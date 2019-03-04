@@ -1,0 +1,18 @@
+modbus_hostname = "127.0.0.1:502"
+scan_interval_sec = 10
+
+[influxdb]
+hostname = "http://localhost:8086"
+database = "db"
+username = "user"
+password = "pw"
+
+[[measurements.moisture]]
+id = 1
+register = 0
+name = "Aloe Vera"
+
+[[measurements.moisture]]
+id = 2
+register = 0
+name = "Orchid"
