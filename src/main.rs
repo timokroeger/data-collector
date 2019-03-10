@@ -83,7 +83,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
                 ctx
             }
             Err(e) => {
-                error!("ModbusTCP: {}, retrying...", e);
+                error!("ModbusTCP: {}, retrying in 10 seconds...", e);
+                sleep(Duration::from_secs(10));
                 continue;
             }
         };
