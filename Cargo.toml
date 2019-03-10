@@ -5,6 +5,7 @@ authors = ["Timo Kröger <timokroeger93@gmail.com>"]
 edition = "2018"
 
 [dependencies]
+clap = "2.32"
 env_logger = "0.6"
 influx_db_client = "0.3"
 log = "0.4"

@@ -4,6 +4,7 @@ use std::io::ErrorKind;
 use std::thread::sleep;
 use std::time::Duration;
 
+use clap::{App, Arg};
 use influx_db_client as influxdb;
 use log::{debug, error, info, warn};
 use serde::Deserialize;
@@ -55,7 +56,19 @@ impl Point {
 fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     env_logger::init();
 
-    let config_str = fs::read_to_string("datacollector.toml")?;
+    let matches = App::new("data-collector")
+        .author("Timo Kröger")
+        .about("Reads data points from a ModbusTCP server and stores them in InfluxDB")
+        .arg(Arg::with_name("config")
+            .short("c")
+            .long("config")
+            .value_name("FILE")
+            .help("Sets a custom config file")
+            .takes_value(true))
+        .get_matches();
+
+    let config_file = matches.value_of("config").unwrap_or("datacollector.toml");
+    let config_str = fs::read_to_string(config_file)?;
     let config: Config = toml::from_str(&config_str)?;
     debug!(
         "Configuration loaded with {} measurement points",
