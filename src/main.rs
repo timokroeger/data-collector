@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
+use std::io::ErrorKind;
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -93,15 +94,16 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
             for (name, points) in &config.measurements {
                 for p in points {
                     ctx.set_slave(Slave(p.id));
-                    let value = match ctx.read_input_registers(p.register, 1) {
-                        Ok(v) => v[0],
-                        Err(e) => {
-                            error!("Modbus: {}, reconnecting...", e);
-                            break 'connection;
-                        }
+                    match ctx.read_input_registers(p.register, 1) {
+                        Ok(values) => influx_points.push(Point::new(name, values[0], p).0),
+                        Err(e) => match e.kind() {
+                            ErrorKind::InvalidData => warn!("Modbus: {}", e),
+                            _ => {
+                                error!("Modbus: {}, reconnecting...", e);
+                                break 'connection;
+                            }
+                        },
                     };
-
-                    influx_points.push(Point::new(name, value, p).0);
                 }
             }
 
