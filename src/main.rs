@@ -4,7 +4,7 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use influx_db_client as influxdb;
-use log::error;
+use log::{debug, error, info, warn};
 use serde::Deserialize;
 use tokio_modbus::prelude::*;
 
@@ -56,6 +56,14 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
 
     let config_str = fs::read_to_string("datacollector.toml")?;
     let config: Config = toml::from_str(&config_str)?;
+    debug!(
+        "Configuration loaded with {} measurement points",
+        config
+            .measurements
+            .iter()
+            .map(|(_, points)| points.len())
+            .sum::<usize>()
+    );
 
     let db = influxdb::Client::new(config.influxdb.hostname, config.influxdb.database);
     let db = match (config.influxdb.username, config.influxdb.password) {
@@ -67,8 +75,12 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
 
     loop {
         // Retry to connect forever
+        debug!("ModbusTCP: Connecting to {}", modbus_host);
         let mut ctx = match sync::tcp::connect(modbus_host) {
-            Ok(ctx) => ctx,
+            Ok(ctx) => {
+                info!("ModbusTCP: Successfully connected to {}", modbus_host);
+                ctx
+            }
             Err(e) => {
                 error!("ModbusTCP: {}, retrying...", e);
                 continue;
