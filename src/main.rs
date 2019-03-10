@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
-use std::io::ErrorKind;
+use std::io::{Error, ErrorKind};
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -8,6 +8,7 @@ use clap::{App, Arg};
 use influx_db_client as influxdb;
 use log::{debug, error, info, warn};
 use serde::Deserialize;
+use tokio_modbus::client::sync::Context;
 use tokio_modbus::prelude::*;
 
 #[derive(Deserialize)]
@@ -15,7 +16,7 @@ struct Config {
     modbus_hostname: String,
     scan_interval_sec: u64,
     influxdb: ConfigInfluxDb,
-    measurements: HashMap<String, Vec<ConfigMeasurement>>,
+    measurements: ConfigMeasurements,
 }
 
 #[derive(Deserialize)]
@@ -25,6 +26,8 @@ struct ConfigInfluxDb {
     username: Option<String>,
     password: Option<String>,
 }
+
+type ConfigMeasurements = HashMap<String, Vec<ConfigMeasurement>>;
 
 #[derive(Deserialize)]
 struct ConfigMeasurement {
@@ -53,18 +56,54 @@ impl Point {
     }
 }
 
+fn connection_task(
+    ctx: &mut Context,
+    db: &influxdb::Client,
+    scan_interval: Duration,
+    meas_config: &ConfigMeasurements,
+) -> Result<(), Error> {
+    loop {
+        let mut points = Vec::new();
+
+        // Read all points into a vector. Ignore invalid data but return early on other errors.
+        for (meas_name, meas_points) in meas_config {
+            for point_config in meas_points {
+                ctx.set_slave(Slave(point_config.id));
+                match ctx.read_input_registers(point_config.register, 1) {
+                    Ok(values) => points.push(Point::new(meas_name, values[0], point_config)),
+                    Err(e) => match e.kind() {
+                        ErrorKind::InvalidData => warn!("Modbus: {}", e),
+                        _ => return Err(e),
+                    },
+                };
+            }
+        }
+
+        db.write_points(
+            influxdb::Points::create_new(points.into_iter().map(|p| p.0).collect()),
+            Some(influxdb::Precision::Seconds),
+            None,
+        )
+        .unwrap_or_else(|e| warn!("InfluxDB: {}", e));
+
+        sleep(scan_interval);
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     env_logger::init();
 
     let matches = App::new("data-collector")
         .author("Timo Kröger")
         .about("Reads data points from a ModbusTCP server and stores them in InfluxDB")
-        .arg(Arg::with_name("config")
-            .short("c")
-            .long("config")
-            .value_name("FILE")
-            .help("Sets a custom config file")
-            .takes_value(true))
+        .arg(
+            Arg::with_name("config")
+                .short("c")
+                .long("config")
+                .value_name("FILE")
+                .help("Sets a custom config file")
+                .takes_value(true),
+        )
         .get_matches();
 
     let config_file = matches.value_of("config").unwrap_or("datacollector.toml");
@@ -79,21 +118,29 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
             .sum::<usize>()
     );
 
+    let modbus_host = config.modbus_hostname.parse().unwrap();
+
     let db = influxdb::Client::new(config.influxdb.hostname, config.influxdb.database);
     let db = match (config.influxdb.username, config.influxdb.password) {
         (Some(username), Some(password)) => db.set_authentication(username, password),
         (_, _) => db,
     };
 
-    let modbus_host = config.modbus_hostname.parse().unwrap();
-
     loop {
         // Retry to connect forever
         debug!("ModbusTCP: Connecting to {}", modbus_host);
-        let mut ctx = match sync::tcp::connect(modbus_host) {
-            Ok(ctx) => {
+        match sync::tcp::connect(modbus_host) {
+            Ok(mut ctx) => {
                 info!("ModbusTCP: Successfully connected to {}", modbus_host);
-                ctx
+                connection_task(
+                    &mut ctx,
+                    &db,
+                    Duration::from_secs(config.scan_interval_sec),
+                    &config.measurements,
+                )
+                .unwrap_or_else(|e| {
+                    error!("Modbus Connection: {}, reconnecting...", e);
+                });
             }
             Err(e) => {
                 error!("ModbusTCP: {}, retrying in 10 seconds...", e);
@@ -101,34 +148,5 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
                 continue;
             }
         };
-
-        'connection: loop {
-            let mut influx_points = Vec::new();
-
-            for (name, points) in &config.measurements {
-                for p in points {
-                    ctx.set_slave(Slave(p.id));
-                    match ctx.read_input_registers(p.register, 1) {
-                        Ok(values) => influx_points.push(Point::new(name, values[0], p).0),
-                        Err(e) => match e.kind() {
-                            ErrorKind::InvalidData => warn!("Modbus: {}", e),
-                            _ => {
-                                error!("Modbus: {}, reconnecting...", e);
-                                break 'connection;
-                            }
-                        },
-                    };
-                }
-            }
-
-            db.write_points(
-                influxdb::Points::create_new(influx_points),
-                Some(influxdb::Precision::Seconds),
-                None,
-            )
-            .unwrap_or_else(|e| error!("InfluxDB: {}", e));
-
-            sleep(Duration::from_secs(config.scan_interval_sec));
-        }
     }
 }
