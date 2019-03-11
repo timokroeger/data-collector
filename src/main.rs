@@ -4,7 +4,7 @@ use std::io::{Error, ErrorKind};
 use std::thread::sleep;
 use std::time::Duration;
 
-use clap::{App, Arg};
+use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
 use influx_db_client as influxdb;
 use log::{debug, error, info, warn};
 use serde::Deserialize;
@@ -93,9 +93,7 @@ fn connection_task(
 fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     env_logger::init();
 
-    let matches = App::new("data-collector")
-        .author("Timo Kröger")
-        .about("Reads data points from a ModbusTCP server and stores them in InfluxDB")
+    let matches = app_from_crate!()
         .arg(
             Arg::with_name("config")
                 .short("c")

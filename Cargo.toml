@@ -2,10 +2,11 @@
 name = "data-collector"
 version = "0.1.0"
 authors = ["Timo Kröger <timokroeger93@gmail.com>"]
+description = "Reads data points from a ModbusTCP server and stores them in InfluxDB"
 edition = "2018"
 
 [dependencies]
-clap = "2.32"
+clap = "2"
 env_logger = "0.6"
 influx_db_client = "0.3"
 log = "0.4"
