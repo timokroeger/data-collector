@@ -107,8 +107,9 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     let config_file = matches.value_of("config").unwrap_or("datacollector.toml");
     let config_str = fs::read_to_string(config_file)?;
     let config: Config = toml::from_str(&config_str)?;
-    debug!(
-        "Configuration loaded with {} measurement points",
+    info!(
+        "Configuration loaded from {} with {} measurement points",
+        config_file,
         config
             .measurements
             .iter()
