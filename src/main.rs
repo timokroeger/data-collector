@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::Error;
 use std::thread::sleep;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
 use influx_db_client as influxdb;
@@ -52,21 +52,27 @@ struct ConfigPoint {
     tags: HashMap<String, toml::Value>,
 }
 
-struct Point(influxdb::Point);
+struct Point<'a> {
+    measurement: &'a str,
+    timestamp: SystemTime,
+    value: u16,
+    config: &'a ConfigPoint,
+}
 
-impl Point {
-    fn new(measurement: &str, value: u16, config: &ConfigPoint) -> Point {
-        let mut p = influxdb::Point::new(&measurement);
-        p.add_field("value", influxdb::Value::Integer(i64::from(value)));
-        p.add_tag("id", influxdb::Value::String(config.id.to_string()));
+impl<'a> Point<'a> {
+    fn as_influxdb_point(&self) -> influxdb::Point {
+        let mut p = influxdb::Point::new(self.measurement);
+        p.add_field("value", influxdb::Value::Integer(i64::from(self.value)));
+        p.add_tag("id", influxdb::Value::String(self.config.id.to_string()));
         p.add_tag(
             "register",
-            influxdb::Value::String(config.register.to_string()),
+            influxdb::Value::String(self.config.register.to_string()),
         );
-        for (tag_name, tag_value) in &config.tags {
+        for (tag_name, tag_value) in &self.config.tags {
             p.add_tag(tag_name, influxdb::Value::String(tag_value.to_string()));
         }
-        Point(p)
+        p.add_timestamp(self.timestamp.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64);
+        p
     }
 }
 
@@ -83,7 +89,12 @@ fn connection_task(
             for point_config in meas_points {
                 ctx.set_slave(point_config.id);
                 match ctx.read_input_registers(point_config.register, 1) {
-                    Ok(values) => points.push(Point::new(meas_name, values[0], point_config)),
+                    Ok(values) => points.push(Point {
+                        measurement: meas_name,
+                        timestamp: SystemTime::now(),
+                        value: values[0],
+                        config: &point_config,
+                    }),
                     Err(e) => match e {
                         ModbusError::Io(e) => return Err(e),
                         _ => warn!("Modbus: {}", e),
@@ -93,7 +104,9 @@ fn connection_task(
         }
 
         db.write_points(
-            influxdb::Points::create_new(points.into_iter().map(|p| p.0).collect()),
+            influxdb::Points::create_new(
+                points.into_iter().map(|p| p.as_influxdb_point()).collect(),
+            ),
             Some(influxdb::Precision::Seconds),
             None,
         )
