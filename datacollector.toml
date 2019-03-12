@@ -1,5 +1,9 @@
-modbus_hostname = "127.0.0.1:502"
 scan_interval_sec = 10
+
+[modbus]
+hostname = "127.0.0.1"
+port = 502
+timeout_sec = 1
 
 [influxdb]
 hostname = "http://localhost:8086"

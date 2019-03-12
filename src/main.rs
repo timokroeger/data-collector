@@ -1,22 +1,31 @@
 use std::collections::HashMap;
 use std::fs;
-use std::io::{Error, ErrorKind};
+use std::io::Error;
 use std::thread::sleep;
 use std::time::Duration;
 
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
 use influx_db_client as influxdb;
 use log::{debug, error, info, warn};
+use modbus::{
+    tcp::{Config as ModbusTcpConfig, Transport},
+    Client, Error as ModbusError,
+};
 use serde::Deserialize;
-use tokio_modbus::client::sync::Context;
-use tokio_modbus::prelude::*;
 
 #[derive(Deserialize)]
 struct Config {
-    modbus_hostname: String,
     scan_interval_sec: u64,
+    modbus: ConfigModbus,
     influxdb: ConfigInfluxDb,
     measurements: ConfigMeasurements,
+}
+
+#[derive(Deserialize)]
+struct ConfigModbus {
+    hostname: String,
+    port: u16,
+    timeout_sec: u64,
 }
 
 #[derive(Deserialize)]
@@ -57,7 +66,7 @@ impl Point {
 }
 
 fn connection_task(
-    ctx: &mut Context,
+    ctx: &mut Client,
     db: &influxdb::Client,
     scan_interval: Duration,
     meas_config: &ConfigMeasurements,
@@ -68,12 +77,12 @@ fn connection_task(
         // Read all points into a vector. Ignore invalid data but return early on other errors.
         for (meas_name, meas_points) in meas_config {
             for point_config in meas_points {
-                ctx.set_slave(Slave(point_config.id));
+                ctx.set_slave(point_config.id);
                 match ctx.read_input_registers(point_config.register, 1) {
                     Ok(values) => points.push(Point::new(meas_name, values[0], point_config)),
-                    Err(e) => match e.kind() {
-                        ErrorKind::InvalidData => warn!("Modbus: {}", e),
-                        _ => return Err(e),
+                    Err(e) => match e {
+                        ModbusError::Io(e) => return Err(e),
+                        _ => warn!("Modbus: {}", e),
                     },
                 };
             }
@@ -117,20 +126,27 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
             .sum::<usize>()
     );
 
-    let modbus_host = config.modbus_hostname.parse().unwrap();
-
     let db = influxdb::Client::new(config.influxdb.hostname, config.influxdb.database);
     let db = match (config.influxdb.username, config.influxdb.password) {
         (Some(username), Some(password)) => db.set_authentication(username, password),
         (_, _) => db,
     };
 
+    let modbus_hostname = &config.modbus.hostname;
+    let modbus_config = ModbusTcpConfig {
+        tcp_port: config.modbus.port,
+        tcp_connect_timeout: Some(Duration::from_secs(config.modbus.timeout_sec)),
+        tcp_read_timeout: Some(Duration::from_secs(config.modbus.timeout_sec)),
+        tcp_write_timeout: Some(Duration::from_secs(config.modbus.timeout_sec)),
+        modbus_uid: 0,
+    };
+
     loop {
         // Retry to connect forever
-        debug!("ModbusTCP: Connecting to {}", modbus_host);
-        match sync::tcp::connect(modbus_host) {
+        debug!("ModbusTCP: Connecting to {}", modbus_hostname);
+        match Transport::new_with_cfg(modbus_hostname, modbus_config) {
             Ok(mut ctx) => {
-                info!("ModbusTCP: Successfully connected to {}", modbus_host);
+                info!("ModbusTCP: Successfully connected to {}", modbus_hostname);
                 connection_task(
                     &mut ctx,
                     &db,
@@ -138,7 +154,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
                     &config.measurements,
                 )
                 .unwrap_or_else(|e| {
-                    error!("Modbus Connection: {}, reconnecting...", e);
+                    error!("ModbusTCP: {}, reconnecting...", e);
                 });
             }
             Err(e) => {
