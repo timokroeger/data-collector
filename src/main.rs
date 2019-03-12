@@ -15,7 +15,6 @@ use serde::Deserialize;
 
 #[derive(Deserialize)]
 struct Config {
-    scan_interval_sec: u64,
     modbus: ConfigModbus,
     influxdb: ConfigInfluxDb,
     measurements: ConfigMeasurements,
@@ -36,10 +35,16 @@ struct ConfigInfluxDb {
     password: Option<String>,
 }
 
-type ConfigMeasurements = HashMap<String, Vec<ConfigMeasurement>>;
+#[derive(Deserialize)]
+struct ConfigMeasurements {
+    scan_interval_sec: u64,
+
+    #[serde(flatten)]
+    entries: HashMap<String, Vec<ConfigPoint>>,
+}
 
 #[derive(Deserialize)]
-struct ConfigMeasurement {
+struct ConfigPoint {
     id: u8,
     register: u16,
 
@@ -50,7 +55,7 @@ struct ConfigMeasurement {
 struct Point(influxdb::Point);
 
 impl Point {
-    fn new(measurement: &str, value: u16, config: &ConfigMeasurement) -> Point {
+    fn new(measurement: &str, value: u16, config: &ConfigPoint) -> Point {
         let mut p = influxdb::Point::new(&measurement);
         p.add_field("value", influxdb::Value::Integer(i64::from(value)));
         p.add_tag("id", influxdb::Value::String(config.id.to_string()));
@@ -68,14 +73,13 @@ impl Point {
 fn connection_task(
     ctx: &mut Client,
     db: &influxdb::Client,
-    scan_interval: Duration,
     meas_config: &ConfigMeasurements,
 ) -> Result<(), Error> {
     loop {
         let mut points = Vec::new();
 
         // Read all points into a vector. Ignore invalid data but return early on other errors.
-        for (meas_name, meas_points) in meas_config {
+        for (meas_name, meas_points) in &meas_config.entries {
             for point_config in meas_points {
                 ctx.set_slave(point_config.id);
                 match ctx.read_input_registers(point_config.register, 1) {
@@ -95,7 +99,7 @@ fn connection_task(
         )
         .unwrap_or_else(|e| warn!("InfluxDB: {}", e));
 
-        sleep(scan_interval);
+        sleep(Duration::from_secs(meas_config.scan_interval_sec));
     }
 }
 
@@ -121,6 +125,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
         config_file,
         config
             .measurements
+            .entries
             .iter()
             .map(|(_, points)| points.len())
             .sum::<usize>()
@@ -147,13 +152,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
         match Transport::new_with_cfg(modbus_hostname, modbus_config) {
             Ok(mut ctx) => {
                 info!("ModbusTCP: Successfully connected to {}", modbus_hostname);
-                connection_task(
-                    &mut ctx,
-                    &db,
-                    Duration::from_secs(config.scan_interval_sec),
-                    &config.measurements,
-                )
-                .unwrap_or_else(|e| {
+                connection_task(&mut ctx, &db, &config.measurements).unwrap_or_else(|e| {
                     error!("ModbusTCP: {}, reconnecting...", e);
                 });
             }
