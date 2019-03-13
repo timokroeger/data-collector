@@ -37,15 +37,14 @@ struct ConfigInfluxDb {
     password: Option<String>,
 }
 
-// TODO: Remove clone
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize)]
 struct ConfigSensorGroup {
     scan_interval_sec: u64,
     measurement_registers: HashMap<String, u16>,
     sensors: Vec<ConfigSensor>,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize)]
 struct ConfigSensor {
     id: u8,
 
@@ -107,17 +106,17 @@ where
 fn connection_task(
     ctx: &mut Client,
     db: &influxdb::Client,
-    sensor_groups: HashMap<String, ConfigSensorGroup>,
+    sensor_groups: &HashMap<String, ConfigSensorGroup>,
 ) -> Result<(), Error> {
     // TODO: Support more than one sensor group
     let (group, sensor_group) = sensor_groups.into_iter().next().unwrap();
 
     // Create a register map that can be indexed by the register address and holds the measurement
     // name for that entry by swapping key and value of the configuration table.
-    let register_map: BTreeMap<u16, String> = sensor_group
+    let register_map: BTreeMap<u16, &String> = sensor_group
         .measurement_registers
-        .into_iter()
-        .map(move |(k, v)| (v, k))
+        .iter()
+        .map(|(k, &v)| (v, k))
         .collect();
     let read_reg_calls = merge_read_regs(register_map.keys().cloned());
 
@@ -206,7 +205,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
         match Transport::new_with_cfg(modbus_hostname, modbus_config) {
             Ok(mut ctx) => {
                 info!("ModbusTCP: Successfully connected to {}", modbus_hostname);
-                connection_task(&mut ctx, &db, config.sensor_groups.to_owned())
+                connection_task(&mut ctx, &db, &config.sensor_groups)
                     .unwrap_or_else(|e| error!("ModbusTCP: {}, reconnecting...", e));
             }
             Err(e) => {
