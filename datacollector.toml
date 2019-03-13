@@ -9,15 +9,18 @@ database = "db"
 username = "user"
 password = "pw"
 
-[measurements]
+[group1]
 scan_interval_sec = 10
 
-[[measurements.moisture]]
+[group1.measurement_registers]
+moisture = 0
+temperature = 1
+
+[[group1.sensors]]
 id = 1
-register = 0
 name = "Aloe Vera"
 
-[[measurements.moisture]]
+[[group1.sensors]]
 id = 2
-register = 0
 name = "Orchid"
+replaced_on = "2019-03-01"

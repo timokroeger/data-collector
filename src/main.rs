@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::Error;
 use std::thread::sleep;
@@ -17,7 +17,9 @@ use serde::Deserialize;
 struct Config {
     modbus: ConfigModbus,
     influxdb: ConfigInfluxDb,
-    measurements: ConfigMeasurements,
+
+    #[serde(flatten)]
+    sensor_groups: HashMap<String, ConfigSensorGroup>,
 }
 
 #[derive(Deserialize)]
@@ -35,18 +37,17 @@ struct ConfigInfluxDb {
     password: Option<String>,
 }
 
-#[derive(Deserialize)]
-struct ConfigMeasurements {
+// TODO: Remove clone
+#[derive(Deserialize, Clone)]
+struct ConfigSensorGroup {
     scan_interval_sec: u64,
-
-    #[serde(flatten)]
-    entries: HashMap<String, Vec<ConfigPoint>>,
+    measurement_registers: HashMap<String, u16>,
+    sensors: Vec<ConfigSensor>,
 }
 
-#[derive(Deserialize)]
-struct ConfigPoint {
+#[derive(Deserialize, Clone)]
+struct ConfigSensor {
     id: u8,
-    register: u16,
 
     #[serde(flatten)]
     tags: HashMap<String, toml::Value>,
@@ -56,45 +57,90 @@ struct Point<'a> {
     measurement: &'a str,
     timestamp: SystemTime,
     value: u16,
-    config: &'a ConfigPoint,
+    sensor_group: &'a str,
+    sensor_config: &'a ConfigSensor,
+    register: u16,
 }
 
 impl<'a> Point<'a> {
     fn as_influxdb_point(&self) -> influxdb::Point {
         let mut p = influxdb::Point::new(self.measurement);
         p.add_field("value", influxdb::Value::Integer(i64::from(self.value)));
-        p.add_tag("id", influxdb::Value::String(self.config.id.to_string()));
         p.add_tag(
-            "register",
-            influxdb::Value::String(self.config.register.to_string()),
+            "group",
+            influxdb::Value::String(self.sensor_group.to_owned()),
         );
-        for (tag_name, tag_value) in &self.config.tags {
+        p.add_tag(
+            "id",
+            influxdb::Value::String(self.sensor_config.id.to_string()),
+        );
+        for (tag_name, tag_value) in &self.sensor_config.tags {
             p.add_tag(tag_name, influxdb::Value::String(tag_value.to_string()));
         }
+        p.add_tag(
+            "register",
+            influxdb::Value::String(self.register.to_string()),
+        );
         p.add_timestamp(self.timestamp.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64);
         p
     }
 }
 
+#[derive(Debug, PartialEq)]
+struct ReadRegistersParams(u16, u16);
+
+// Group consecutive registers into one request
+fn merge_read_regs<I>(regs: I) -> Vec<ReadRegistersParams>
+where
+    I: IntoIterator<Item = u16>,
+{
+    let mut params: Vec<ReadRegistersParams> = Vec::new();
+    for r in regs {
+        match params.last_mut() {
+            Some(ref mut p) if r == p.0 + p.1 => p.1 += 1,
+            _ => params.push(ReadRegistersParams(r, 1)),
+        }
+    }
+    params
+}
+
 fn connection_task(
     ctx: &mut Client,
     db: &influxdb::Client,
-    meas_config: &ConfigMeasurements,
+    sensor_groups: HashMap<String, ConfigSensorGroup>,
 ) -> Result<(), Error> {
+    // TODO: Support more than one sensor group
+    let (group, sensor_group) = sensor_groups.into_iter().next().unwrap();
+
+    // Create a register map that can be indexed by the register address and holds the measurement
+    // name for that entry by swapping key and value of the configuration table.
+    let register_map: BTreeMap<u16, String> = sensor_group
+        .measurement_registers
+        .into_iter()
+        .map(move |(k, v)| (v, k))
+        .collect();
+    let read_reg_calls = merge_read_regs(register_map.keys().cloned());
+
     loop {
         let mut points = Vec::new();
 
-        // Read all points into a vector. Ignore invalid data but return early on other errors.
-        for (meas_name, meas_points) in &meas_config.entries {
-            for point_config in meas_points {
-                ctx.set_slave(point_config.id);
-                match ctx.read_input_registers(point_config.register, 1) {
-                    Ok(values) => points.push(Point {
-                        measurement: meas_name,
-                        timestamp: SystemTime::now(),
-                        value: values[0],
-                        config: &point_config,
-                    }),
+        for sensor in &sensor_group.sensors {
+            ctx.set_slave(sensor.id);
+            for param in &read_reg_calls {
+                match ctx.read_input_registers(param.0, param.1) {
+                    Ok(values) => {
+                        for (i, &v) in values.iter().enumerate() {
+                            let reg = param.0 + i as u16;
+                            points.push(Point {
+                                measurement: &register_map[&reg],
+                                timestamp: SystemTime::now(),
+                                value: v,
+                                sensor_group: &group,
+                                sensor_config: sensor,
+                                register: reg,
+                            })
+                        }
+                    }
                     Err(e) => match e {
                         ModbusError::Io(e) => return Err(e),
                         _ => warn!("Modbus: {}", e),
@@ -112,7 +158,7 @@ fn connection_task(
         )
         .unwrap_or_else(|e| warn!("InfluxDB: {}", e));
 
-        sleep(Duration::from_secs(meas_config.scan_interval_sec));
+        sleep(Duration::from_secs(sensor_group.scan_interval_sec));
     }
 }
 
@@ -134,14 +180,9 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     let config_str = fs::read_to_string(config_file)?;
     let config: Config = toml::from_str(&config_str)?;
     info!(
-        "Configuration loaded from {} with {} measurement points",
+        "Configuration loaded from {} with {} sensor groups",
         config_file,
-        config
-            .measurements
-            .entries
-            .iter()
-            .map(|(_, points)| points.len())
-            .sum::<usize>()
+        config.sensor_groups.len()
     );
 
     let db = influxdb::Client::new(config.influxdb.hostname, config.influxdb.database);
@@ -165,9 +206,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
         match Transport::new_with_cfg(modbus_hostname, modbus_config) {
             Ok(mut ctx) => {
                 info!("ModbusTCP: Successfully connected to {}", modbus_hostname);
-                connection_task(&mut ctx, &db, &config.measurements).unwrap_or_else(|e| {
-                    error!("ModbusTCP: {}, reconnecting...", e);
-                });
+                connection_task(&mut ctx, &db, config.sensor_groups.to_owned())
+                    .unwrap_or_else(|e| error!("ModbusTCP: {}, reconnecting...", e));
             }
             Err(e) => {
                 error!("ModbusTCP: {}, retrying in 10 seconds...", e);
@@ -175,5 +215,22 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
                 continue;
             }
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_merge_read_regs() {
+        assert_eq!(
+            merge_read_regs([4, 5, 6, 9, 10, 12].iter().cloned()),
+            vec![
+                ReadRegistersParams(4, 3),
+                ReadRegistersParams(9, 2),
+                ReadRegistersParams(12, 1)
+            ]
+        );
     }
 }
