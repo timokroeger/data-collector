@@ -1,59 +1,19 @@
 mod config;
+mod sensor;
 
 use std::collections::BTreeMap;
 use std::io::Error;
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
 use config::*;
 use influx_db_client::{
-    Client as InfluxDbClient, Point as InfluxDbPoint, Points, Precision, Value as InfluxDbValue,
+    Client as InfluxDbClient, Points, Precision,
 };
 use log::{debug, error, info, warn};
-use modbus::{tcp::Transport, Client as ModbusClient, Error as ModbusError};
-
-fn new_influxdb_point(
-    measurement: &str,
-    timestamp: SystemTime,
-    value: u16,
-    tags: &BTreeMap<&str, String>,
-) -> InfluxDbPoint {
-    let mut p = InfluxDbPoint::new(measurement);
-    p.add_field("value", InfluxDbValue::Integer(i64::from(value)));
-    for (k, v) in tags {
-        p.add_tag(k, InfluxDbValue::String(v.to_string()));
-    }
-    p.add_timestamp(timestamp.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64);
-    p
-}
-
-/// A Register map that has the register address as key and measurement name as value.
-struct RegisterMap(BTreeMap<u16, String>);
-
-impl RegisterMap {
-    // Group consecutive registers into one request
-    fn merged_reads(&self) -> Vec<ReadRegistersParams> {
-        let mut params: Vec<ReadRegistersParams> = Vec::new();
-        for &r in self.0.keys() {
-            match params.last_mut() {
-                Some(ref mut p) if r == p.0 + p.1 => p.1 += 1,
-                _ => params.push(ReadRegistersParams(r, 1)),
-            }
-        }
-        params
-    }
-}
-
-impl From<RegisterConfig> for RegisterMap {
-    fn from(cfg: RegisterConfig) -> Self {
-        // Swap key and value of the toml configuration table
-        RegisterMap(cfg.into_iter().map(|(k, v)| (v, k)).collect())
-    }
-}
-
-#[derive(Debug, PartialEq)]
-struct ReadRegistersParams(u16, u16);
+use modbus::{tcp::Transport, Client as ModbusClient};
+use sensor::{RegisterMap, Sensor};
 
 fn connection_task(
     mb: &mut ModbusClient,
@@ -65,43 +25,19 @@ fn connection_task(
 
     // TODO: Remove clone()
     let register_map: RegisterMap = sensor_group.measurement_registers.clone().into();
-    let read_reg_calls = register_map.merged_reads();
+
+    let mut sensors = Vec::new();
+    for sensor in &sensor_group.sensors {
+        let tags = sensor.tags.iter().map(|(k, v)| (k.clone(), v.to_string())).collect();
+        sensors.push(Sensor::new(sensor.id, &group, &register_map, tags));
+    }
 
     loop {
         let mut points = Vec::new();
 
-        for sensor in &sensor_group.sensors {
-            mb.set_slave(sensor.id);
-            for param in &read_reg_calls {
-                match mb.read_input_registers(param.0, param.1) {
-                    Ok(values) => {
-                        for (i, &v) in values.iter().enumerate() {
-                            let reg = param.0 + i as u16;
-                            let mut tags: BTreeMap<&str, String> = BTreeMap::new();
-                            tags.insert("group", group.to_string());
-                            tags.insert("id", sensor.id.to_string());
-                            tags.insert("register", reg.to_string());
-                            tags.append(
-                                &mut sensor
-                                    .tags
-                                    .iter()
-                                    .map(|(k, v)| (k.as_str(), v.to_string()))
-                                    .collect(),
-                            );
-                            points.push(new_influxdb_point(
-                                &register_map.0[&reg],
-                                SystemTime::now(),
-                                v,
-                                &tags,
-                            ));
-                        }
-                    }
-                    Err(e) => match e {
-                        ModbusError::Io(e) => return Err(e),
-                        _ => warn!("Modbus: {}", e),
-                    },
-                };
-            }
+        for sensor in &mut sensors {
+            let register_values = sensor.read_registers(mb)?;
+            points.append(&mut sensor.get_points(&register_values));
         }
 
         db.write_points(Points::create_new(points), Some(Precision::Seconds), None)
@@ -151,32 +87,5 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
                 continue;
             }
         };
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_merge_read_regs() {
-        let mut reg_config = RegisterConfig::new();
-        reg_config.insert("a".to_string(), 4);
-        reg_config.insert("x".to_string(), 5);
-        reg_config.insert("b".to_string(), 6);
-        reg_config.insert("d".to_string(), 9);
-        reg_config.insert("o".to_string(), 10);
-        reg_config.insert("f".to_string(), 12);
-
-        let reg_map: RegisterMap = reg_config.into();
-
-        assert_eq!(
-            reg_map.merged_reads(),
-            vec![
-                ReadRegistersParams(4, 3),
-                ReadRegistersParams(9, 2),
-                ReadRegistersParams(12, 1)
-            ]
-        );
     }
 }
