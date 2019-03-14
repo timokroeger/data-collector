@@ -13,31 +13,19 @@ use influx_db_client::{
 use log::{debug, error, info, warn};
 use modbus::{tcp::Transport, Client as ModbusClient, Error as ModbusError};
 
-struct Point<'a> {
-    measurement: &'a str,
+fn new_influxdb_point(
+    measurement: &str,
     timestamp: SystemTime,
     value: u16,
-    sensor_group: &'a str,
-    sensor_config: &'a ConfigSensor,
-    register: u16,
-}
-
-impl<'a> Point<'a> {
-    fn as_influxdb_point(&self) -> InfluxDbPoint {
-        let mut p = InfluxDbPoint::new(self.measurement);
-        p.add_field("value", InfluxDbValue::Integer(i64::from(self.value)));
-        p.add_tag("group", InfluxDbValue::String(self.sensor_group.to_owned()));
-        p.add_tag(
-            "id",
-            InfluxDbValue::String(self.sensor_config.id.to_string()),
-        );
-        for (tag_name, tag_value) in &self.sensor_config.tags {
-            p.add_tag(tag_name, InfluxDbValue::String(tag_value.to_string()));
-        }
-        p.add_tag("register", InfluxDbValue::String(self.register.to_string()));
-        p.add_timestamp(self.timestamp.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64);
-        p
+    tags: &BTreeMap<&str, String>,
+) -> InfluxDbPoint {
+    let mut p = InfluxDbPoint::new(measurement);
+    p.add_field("value", InfluxDbValue::Integer(i64::from(value)));
+    for (k, v) in tags {
+        p.add_tag(k, InfluxDbValue::String(v.to_string()));
     }
+    p.add_timestamp(timestamp.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64);
+    p
 }
 
 /// A Register map that has the register address as key and measurement name as value.
@@ -89,14 +77,23 @@ fn connection_task(
                     Ok(values) => {
                         for (i, &v) in values.iter().enumerate() {
                             let reg = param.0 + i as u16;
-                            points.push(Point {
-                                measurement: &register_map.0[&reg],
-                                timestamp: SystemTime::now(),
-                                value: v,
-                                sensor_group: &group,
-                                sensor_config: sensor,
-                                register: reg,
-                            })
+                            let mut tags: BTreeMap<&str, String> = BTreeMap::new();
+                            tags.insert("group", group.to_string());
+                            tags.insert("id", sensor.id.to_string());
+                            tags.insert("register", reg.to_string());
+                            tags.append(
+                                &mut sensor
+                                    .tags
+                                    .iter()
+                                    .map(|(k, v)| (k.as_str(), v.to_string()))
+                                    .collect(),
+                            );
+                            points.push(new_influxdb_point(
+                                &register_map.0[&reg],
+                                SystemTime::now(),
+                                v,
+                                &tags,
+                            ));
                         }
                     }
                     Err(e) => match e {
@@ -107,12 +104,8 @@ fn connection_task(
             }
         }
 
-        db.write_points(
-            Points::create_new(points.into_iter().map(|p| p.as_influxdb_point()).collect()),
-            Some(Precision::Seconds),
-            None,
-        )
-        .unwrap_or_else(|e| warn!("InfluxDB: {}", e));
+        db.write_points(Points::create_new(points), Some(Precision::Seconds), None)
+            .unwrap_or_else(|e| warn!("InfluxDB: {}", e));
 
         thread::sleep(Duration::from_secs(sensor_group.scan_interval_sec));
     }
