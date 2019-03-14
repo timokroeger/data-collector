@@ -1,10 +1,12 @@
-use std::collections::{BTreeMap, HashMap};
-use std::fs;
+mod config;
+
+use std::collections::BTreeMap;
 use std::io::Error;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
+use config::*;
 use influx_db_client::{
     Client as InfluxDbClient, Point as InfluxDbPoint, Points, Precision, Value as InfluxDbValue,
 };
@@ -13,46 +15,6 @@ use modbus::{
     tcp::{Config as ModbusTcpConfig, Transport},
     Client as ModbusClient, Error as ModbusError,
 };
-use serde::Deserialize;
-
-#[derive(Deserialize)]
-struct Config {
-    modbus: ConfigModbus,
-    influxdb: ConfigInfluxDb,
-
-    #[serde(flatten)]
-    sensor_groups: HashMap<String, ConfigSensorGroup>,
-}
-
-#[derive(Deserialize)]
-struct ConfigModbus {
-    hostname: String,
-    port: u16,
-    timeout_sec: u64,
-}
-
-#[derive(Deserialize)]
-struct ConfigInfluxDb {
-    hostname: String,
-    database: String,
-    username: Option<String>,
-    password: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct ConfigSensorGroup {
-    scan_interval_sec: u64,
-    measurement_registers: HashMap<String, u16>,
-    sensors: Vec<ConfigSensor>,
-}
-
-#[derive(Deserialize)]
-struct ConfigSensor {
-    id: u8,
-
-    #[serde(flatten)]
-    tags: HashMap<String, toml::Value>,
-}
 
 struct Point<'a> {
     measurement: &'a str,
@@ -102,7 +64,7 @@ where
 fn connection_task(
     mb: &mut ModbusClient,
     db: &InfluxDbClient,
-    sensor_groups: &HashMap<String, ConfigSensorGroup>,
+    sensor_groups: &BTreeMap<String, ConfigSensorGroup>,
 ) -> Result<(), Error> {
     // TODO: Support more than one sensor group
     let (group, sensor_group) = sensor_groups.into_iter().next().unwrap();
@@ -170,8 +132,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
         .get_matches();
 
     let config_file = matches.value_of("config").unwrap_or("datacollector.toml");
-    let config_str = fs::read_to_string(config_file)?;
-    let config: Config = toml::from_str(&config_str)?;
+    let config = Config::new(&config_file);
     info!(
         "Configuration loaded from {} with {} sensor groups",
         config_file,
