@@ -1,15 +1,17 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::Error;
-use std::thread::sleep;
+use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
-use influx_db_client as influxdb;
+use influx_db_client::{
+    Client as InfluxDbClient, Point as InfluxDbPoint, Points, Precision, Value as InfluxDbValue,
+};
 use log::{debug, error, info, warn};
 use modbus::{
     tcp::{Config as ModbusTcpConfig, Transport},
-    Client, Error as ModbusError,
+    Client as ModbusClient, Error as ModbusError,
 };
 use serde::Deserialize;
 
@@ -62,24 +64,18 @@ struct Point<'a> {
 }
 
 impl<'a> Point<'a> {
-    fn as_influxdb_point(&self) -> influxdb::Point {
-        let mut p = influxdb::Point::new(self.measurement);
-        p.add_field("value", influxdb::Value::Integer(i64::from(self.value)));
-        p.add_tag(
-            "group",
-            influxdb::Value::String(self.sensor_group.to_owned()),
-        );
+    fn as_influxdb_point(&self) -> InfluxDbPoint {
+        let mut p = InfluxDbPoint::new(self.measurement);
+        p.add_field("value", InfluxDbValue::Integer(i64::from(self.value)));
+        p.add_tag("group", InfluxDbValue::String(self.sensor_group.to_owned()));
         p.add_tag(
             "id",
-            influxdb::Value::String(self.sensor_config.id.to_string()),
+            InfluxDbValue::String(self.sensor_config.id.to_string()),
         );
         for (tag_name, tag_value) in &self.sensor_config.tags {
-            p.add_tag(tag_name, influxdb::Value::String(tag_value.to_string()));
+            p.add_tag(tag_name, InfluxDbValue::String(tag_value.to_string()));
         }
-        p.add_tag(
-            "register",
-            influxdb::Value::String(self.register.to_string()),
-        );
+        p.add_tag("register", InfluxDbValue::String(self.register.to_string()));
         p.add_timestamp(self.timestamp.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64);
         p
     }
@@ -104,8 +100,8 @@ where
 }
 
 fn connection_task(
-    ctx: &mut Client,
-    db: &influxdb::Client,
+    mb: &mut ModbusClient,
+    db: &InfluxDbClient,
     sensor_groups: &HashMap<String, ConfigSensorGroup>,
 ) -> Result<(), Error> {
     // TODO: Support more than one sensor group
@@ -124,9 +120,9 @@ fn connection_task(
         let mut points = Vec::new();
 
         for sensor in &sensor_group.sensors {
-            ctx.set_slave(sensor.id);
+            mb.set_slave(sensor.id);
             for param in &read_reg_calls {
-                match ctx.read_input_registers(param.0, param.1) {
+                match mb.read_input_registers(param.0, param.1) {
                     Ok(values) => {
                         for (i, &v) in values.iter().enumerate() {
                             let reg = param.0 + i as u16;
@@ -149,15 +145,13 @@ fn connection_task(
         }
 
         db.write_points(
-            influxdb::Points::create_new(
-                points.into_iter().map(|p| p.as_influxdb_point()).collect(),
-            ),
-            Some(influxdb::Precision::Seconds),
+            Points::create_new(points.into_iter().map(|p| p.as_influxdb_point()).collect()),
+            Some(Precision::Seconds),
             None,
         )
         .unwrap_or_else(|e| warn!("InfluxDB: {}", e));
 
-        sleep(Duration::from_secs(sensor_group.scan_interval_sec));
+        thread::sleep(Duration::from_secs(sensor_group.scan_interval_sec));
     }
 }
 
@@ -184,7 +178,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
         config.sensor_groups.len()
     );
 
-    let db = influxdb::Client::new(config.influxdb.hostname, config.influxdb.database);
+    let db = InfluxDbClient::new(config.influxdb.hostname, config.influxdb.database);
     let db = match (config.influxdb.username, config.influxdb.password) {
         (Some(username), Some(password)) => db.set_authentication(username, password),
         (_, _) => db,
@@ -203,14 +197,14 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
         // Retry to connect forever
         debug!("ModbusTCP: Connecting to {}", modbus_hostname);
         match Transport::new_with_cfg(modbus_hostname, modbus_config) {
-            Ok(mut ctx) => {
+            Ok(mut mb) => {
                 info!("ModbusTCP: Successfully connected to {}", modbus_hostname);
-                connection_task(&mut ctx, &db, &config.sensor_groups)
+                connection_task(&mut mb, &db, &config.sensor_groups)
                     .unwrap_or_else(|e| error!("ModbusTCP: {}, reconnecting...", e));
             }
             Err(e) => {
                 error!("ModbusTCP: {}, retrying in 10 seconds...", e);
-                sleep(Duration::from_secs(10));
+                thread::sleep(Duration::from_secs(10));
                 continue;
             }
         };
