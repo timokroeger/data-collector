@@ -139,11 +139,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
         config.sensor_groups.len()
     );
 
-    let db = InfluxDbClient::new(config.influxdb.hostname, config.influxdb.database);
-    let db = match (config.influxdb.username, config.influxdb.password) {
-        (Some(username), Some(password)) => db.set_authentication(username, password),
-        (_, _) => db,
-    };
+    let db = config.influxdb.into_client();
 
     let modbus_hostname = &config.modbus.hostname;
     let modbus_config = ModbusTcpConfig {
