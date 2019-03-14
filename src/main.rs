@@ -40,6 +40,16 @@ impl<'a> Point<'a> {
     }
 }
 
+/// A Register map that has the register address as key and measurement name as value.
+struct RegisterMap(BTreeMap<u16, String>);
+
+impl From<RegisterConfig> for RegisterMap {
+    fn from(cfg: RegisterConfig) -> Self {
+        // Swap key and value of the toml configuration table
+        RegisterMap(cfg.into_iter().map(|(k, v)| (v, k)).collect())
+    }
+}
+
 #[derive(Debug, PartialEq)]
 struct ReadRegistersParams(u16, u16);
 
@@ -61,19 +71,14 @@ where
 fn connection_task(
     mb: &mut ModbusClient,
     db: &InfluxDbClient,
-    sensor_groups: &BTreeMap<String, ConfigSensorGroup>,
+    sensor_groups: &BTreeMap<String, SensorGroupConfig>,
 ) -> Result<(), Error> {
     // TODO: Support more than one sensor group
-    let (group, sensor_group) = sensor_groups.into_iter().next().unwrap();
+    let (group, sensor_group) = sensor_groups.iter().next().unwrap();
 
-    // Create a register map that can be indexed by the register address and holds the measurement
-    // name for that entry by swapping key and value of the configuration table.
-    let register_map: BTreeMap<u16, &String> = sensor_group
-        .measurement_registers
-        .iter()
-        .map(|(k, &v)| (v, k))
-        .collect();
-    let read_reg_calls = merge_read_regs(register_map.keys().cloned());
+    // TODO: Remove clone()
+    let register_map: RegisterMap = sensor_group.measurement_registers.clone().into();
+    let read_reg_calls = merge_read_regs(register_map.0.keys().cloned());
 
     loop {
         let mut points = Vec::new();
@@ -86,7 +91,7 @@ fn connection_task(
                         for (i, &v) in values.iter().enumerate() {
                             let reg = param.0 + i as u16;
                             points.push(Point {
-                                measurement: &register_map[&reg],
+                                measurement: &register_map.0[&reg],
                                 timestamp: SystemTime::now(),
                                 value: v,
                                 sensor_group: &group,

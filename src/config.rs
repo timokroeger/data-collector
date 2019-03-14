@@ -12,7 +12,7 @@ pub struct Config {
     pub influxdb: InfluxDbConfig,
 
     #[serde(flatten)]
-    pub sensor_groups: BTreeMap<String, ConfigSensorGroup>,
+    pub sensor_groups: BTreeMap<String, SensorGroupConfig>,
 }
 
 #[derive(Deserialize)]
@@ -30,14 +30,16 @@ pub struct InfluxDbConfig {
     password: Option<String>,
 }
 
-#[derive(Deserialize)]
-pub struct ConfigSensorGroup {
+#[derive(Deserialize, Clone)]
+pub struct SensorGroupConfig {
     pub scan_interval_sec: u64,
-    pub measurement_registers: BTreeMap<String, u16>,
+    pub measurement_registers: RegisterConfig,
     pub sensors: Vec<ConfigSensor>,
 }
 
-#[derive(Deserialize)]
+pub type RegisterConfig = BTreeMap<String, u16>;
+
+#[derive(Deserialize, Clone)]
 pub struct ConfigSensor {
     pub id: u8,
 
