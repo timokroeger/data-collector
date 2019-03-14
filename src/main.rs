@@ -43,6 +43,20 @@ impl<'a> Point<'a> {
 /// A Register map that has the register address as key and measurement name as value.
 struct RegisterMap(BTreeMap<u16, String>);
 
+impl RegisterMap {
+    // Group consecutive registers into one request
+    fn merged_reads(&self) -> Vec<ReadRegistersParams> {
+        let mut params: Vec<ReadRegistersParams> = Vec::new();
+        for &r in self.0.keys() {
+            match params.last_mut() {
+                Some(ref mut p) if r == p.0 + p.1 => p.1 += 1,
+                _ => params.push(ReadRegistersParams(r, 1)),
+            }
+        }
+        params
+    }
+}
+
 impl From<RegisterConfig> for RegisterMap {
     fn from(cfg: RegisterConfig) -> Self {
         // Swap key and value of the toml configuration table
@@ -52,21 +66,6 @@ impl From<RegisterConfig> for RegisterMap {
 
 #[derive(Debug, PartialEq)]
 struct ReadRegistersParams(u16, u16);
-
-// Group consecutive registers into one request
-fn merge_read_regs<I>(regs: I) -> Vec<ReadRegistersParams>
-where
-    I: IntoIterator<Item = u16>,
-{
-    let mut params: Vec<ReadRegistersParams> = Vec::new();
-    for r in regs {
-        match params.last_mut() {
-            Some(ref mut p) if r == p.0 + p.1 => p.1 += 1,
-            _ => params.push(ReadRegistersParams(r, 1)),
-        }
-    }
-    params
-}
 
 fn connection_task(
     mb: &mut ModbusClient,
@@ -78,7 +77,7 @@ fn connection_task(
 
     // TODO: Remove clone()
     let register_map: RegisterMap = sensor_group.measurement_registers.clone().into();
-    let read_reg_calls = merge_read_regs(register_map.0.keys().cloned());
+    let read_reg_calls = register_map.merged_reads();
 
     loop {
         let mut points = Vec::new();
@@ -168,8 +167,18 @@ mod tests {
 
     #[test]
     fn test_merge_read_regs() {
+        let mut reg_config = RegisterConfig::new();
+        reg_config.insert("a".to_string(), 4);
+        reg_config.insert("x".to_string(), 5);
+        reg_config.insert("b".to_string(), 6);
+        reg_config.insert("d".to_string(), 9);
+        reg_config.insert("o".to_string(), 10);
+        reg_config.insert("f".to_string(), 12);
+
+        let reg_map: RegisterMap = reg_config.into();
+
         assert_eq!(
-            merge_read_regs([4, 5, 6, 9, 10, 12].iter().cloned()),
+            reg_map.merged_reads(),
             vec![
                 ReadRegistersParams(4, 3),
                 ReadRegistersParams(9, 2),
