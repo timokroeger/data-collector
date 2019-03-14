@@ -11,10 +11,7 @@ use influx_db_client::{
     Client as InfluxDbClient, Point as InfluxDbPoint, Points, Precision, Value as InfluxDbValue,
 };
 use log::{debug, error, info, warn};
-use modbus::{
-    tcp::{Config as ModbusTcpConfig, Transport},
-    Client as ModbusClient, Error as ModbusError,
-};
+use modbus::{tcp::Transport, Client as ModbusClient, Error as ModbusError};
 
 struct Point<'a> {
     measurement: &'a str,
@@ -140,20 +137,12 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     );
 
     let db = config.influxdb.into_client();
-
-    let modbus_hostname = &config.modbus.hostname;
-    let modbus_config = ModbusTcpConfig {
-        tcp_port: config.modbus.port,
-        tcp_connect_timeout: Some(Duration::from_secs(config.modbus.timeout_sec)),
-        tcp_read_timeout: Some(Duration::from_secs(config.modbus.timeout_sec)),
-        tcp_write_timeout: Some(Duration::from_secs(config.modbus.timeout_sec)),
-        modbus_uid: 0,
-    };
+    let (modbus_hostname, modbus_config) = config.modbus.into();
 
     loop {
         // Retry to connect forever
         debug!("ModbusTCP: Connecting to {}", modbus_hostname);
-        match Transport::new_with_cfg(modbus_hostname, modbus_config) {
+        match Transport::new_with_cfg(&modbus_hostname, modbus_config) {
             Ok(mut mb) => {
                 info!("ModbusTCP: Successfully connected to {}", modbus_hostname);
                 connection_task(&mut mb, &db, &config.sensor_groups)

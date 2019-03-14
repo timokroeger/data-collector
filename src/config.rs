@@ -1,12 +1,14 @@
 use std::collections::BTreeMap;
 use std::fs;
+use std::time::Duration;
 
 use influx_db_client::Client;
+use modbus::tcp::Config as ModbusTcpConfig;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
 pub struct Config {
-    pub modbus: ConfigModbus,
+    pub modbus: ModbusConfig,
     pub influxdb: InfluxDbConfig,
 
     #[serde(flatten)]
@@ -14,10 +16,10 @@ pub struct Config {
 }
 
 #[derive(Deserialize)]
-pub struct ConfigModbus {
-    pub hostname: String,
-    pub port: u16,
-    pub timeout_sec: u64,
+pub struct ModbusConfig {
+    hostname: String,
+    port: u16,
+    timeout_sec: u64,
 }
 
 #[derive(Deserialize)]
@@ -47,6 +49,21 @@ impl Config {
     pub fn new(filename: &str) -> Self {
         let config_str = fs::read_to_string(filename).unwrap();
         toml::from_str(&config_str).unwrap()
+    }
+}
+
+impl From<ModbusConfig> for (String, ModbusTcpConfig) {
+    fn from(cfg: ModbusConfig) -> Self {
+        (
+            cfg.hostname,
+            ModbusTcpConfig {
+                tcp_port: cfg.port,
+                tcp_connect_timeout: Some(Duration::from_secs(cfg.timeout_sec)),
+                tcp_read_timeout: Some(Duration::from_secs(cfg.timeout_sec)),
+                tcp_write_timeout: Some(Duration::from_secs(cfg.timeout_sec)),
+                modbus_uid: 0,
+            },
+        )
     }
 }
 
