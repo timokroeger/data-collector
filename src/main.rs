@@ -21,7 +21,6 @@ fn connection_task(
     // TODO: Support more than one sensor group
     let (group, sensor_group) = sensor_groups.iter().next().unwrap();
 
-    // TODO: Remove clone()
     let register_map = sensor_group
         .measurement_registers
         .clone()
