@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
 use config::*;
+use humantime;
 use influx_db_client::{Client as InfluxDbClient, Points, Precision};
 use log::{debug, error, info, warn};
 use modbus::{tcp::Transport, Client as ModbusClient};
@@ -76,20 +77,24 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     let db = config.influxdb.into_client();
     let (modbus_hostname, modbus_config) = config.modbus.into();
 
+    // Retry to connect forever
     loop {
-        // Retry to connect forever
         debug!("ModbusTCP: Connecting to {}", modbus_hostname);
-        match Transport::new_with_cfg(&modbus_hostname, modbus_config) {
+        let e = match Transport::new_with_cfg(&modbus_hostname, modbus_config) {
             Ok(mut mb) => {
                 info!("ModbusTCP: Successfully connected to {}", modbus_hostname);
-                connection_task(&mut mb, &db, &config.sensor_groups)
-                    .unwrap_or_else(|e| error!("ModbusTCP: {}, reconnecting...", e));
+                connection_task(&mut mb, &db, &config.sensor_groups).unwrap_err()
             }
-            Err(e) => {
-                error!("ModbusTCP: {}, retrying in 10 seconds...", e);
-                thread::sleep(Duration::from_secs(10));
-                continue;
-            }
+            Err(e) => e,
         };
+
+        // TODO: Exponential backoff
+        let delay = Duration::from_secs(10);
+        error!(
+            "ModbusTCP: {}, reconnecting in {}...",
+            e,
+            humantime::format_duration(delay)
+        );
+        thread::sleep(delay);
     }
 }

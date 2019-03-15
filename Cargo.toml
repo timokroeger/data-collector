@@ -8,6 +8,7 @@ edition = "2018"
 [dependencies]
 clap = "2"
 env_logger = "0.6"
+humantime = "1.2"
 influx_db_client = "0.3"
 log = "0.4"
 modbus = { git = "https://github.com/TimoKroeger/modbus-rs", branch = "slave_id" }
