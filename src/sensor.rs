@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::Error;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::config::RegisterConfig;
 use influx_db_client::{Point, Value};
 use log::warn;
 use modbus::{Client, Error as ModbusError};
@@ -11,6 +10,10 @@ use modbus::{Client, Error as ModbusError};
 pub struct RegisterMap(BTreeMap<u16, String>);
 
 impl RegisterMap {
+    pub fn new(register_names: BTreeMap<u16, String>) -> Self {
+        Self(register_names)
+    }
+
     // Group consecutive registers into one request
     fn merged_reads(&self) -> Vec<ReadRegistersParams> {
         let mut params: Vec<ReadRegistersParams> = Vec::new();
@@ -21,13 +24,6 @@ impl RegisterMap {
             }
         }
         params
-    }
-}
-
-impl From<RegisterConfig> for RegisterMap {
-    fn from(cfg: RegisterConfig) -> Self {
-        // Swap key and value of the toml configuration table
-        RegisterMap(cfg.into_iter().map(|(k, v)| (v, k)).collect())
     }
 }
 

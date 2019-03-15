@@ -8,12 +8,10 @@ use std::time::Duration;
 
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
 use config::*;
-use influx_db_client::{
-    Client as InfluxDbClient, Points, Precision,
-};
+use influx_db_client::{Client as InfluxDbClient, Points, Precision};
 use log::{debug, error, info, warn};
 use modbus::{tcp::Transport, Client as ModbusClient};
-use sensor::{RegisterMap, Sensor};
+use sensor::Sensor;
 
 fn connection_task(
     mb: &mut ModbusClient,
@@ -24,11 +22,18 @@ fn connection_task(
     let (group, sensor_group) = sensor_groups.iter().next().unwrap();
 
     // TODO: Remove clone()
-    let register_map: RegisterMap = sensor_group.measurement_registers.clone().into();
+    let register_map = sensor_group
+        .measurement_registers
+        .clone()
+        .into_register_map();
 
     let mut sensors = Vec::new();
     for sensor in &sensor_group.sensors {
-        let tags = sensor.tags.iter().map(|(k, v)| (k.clone(), v.to_string())).collect();
+        let tags = sensor
+            .tags
+            .iter()
+            .map(|(k, v)| (k.clone(), v.to_string()))
+            .collect();
         sensors.push(Sensor::new(sensor.id, &group, &register_map, tags));
     }
 

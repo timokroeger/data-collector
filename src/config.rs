@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::time::Duration;
 
+use crate::sensor::RegisterMap;
 use influx_db_client::Client;
 use modbus::tcp::Config as ModbusTcpConfig;
 use serde::Deserialize;
@@ -37,7 +38,8 @@ pub struct SensorGroupConfig {
     pub sensors: Vec<ConfigSensor>,
 }
 
-pub type RegisterConfig = BTreeMap<String, u16>;
+#[derive(Deserialize, Clone)]
+pub struct RegisterConfig(BTreeMap<String, u16>);
 
 #[derive(Deserialize, Clone)]
 pub struct ConfigSensor {
@@ -66,6 +68,13 @@ impl From<ModbusConfig> for (String, ModbusTcpConfig) {
                 modbus_uid: 0,
             },
         )
+    }
+}
+
+impl RegisterConfig {
+    pub fn into_register_map(self) -> RegisterMap {
+        // Swap key and value of the toml configuration table
+        RegisterMap::new(self.0.into_iter().map(|(k, v)| (v, k)).collect())
     }
 }
 
