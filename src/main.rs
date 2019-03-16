@@ -77,13 +77,14 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
             Arg::with_name("config")
                 .short("c")
                 .long("config")
+                .takes_value(true)
                 .value_name("FILE")
-                .help("Sets a custom config file")
-                .takes_value(true),
+                .default_value("datacollector.toml")
+                .help("Sets a custom config file"),
         )
         .get_matches();
 
-    let config_file = matches.value_of("config").unwrap_or("datacollector.toml");
+    let config_file = matches.value_of("config").unwrap();
     let config = Config::new(&config_file);
     info!(
         "Configuration loaded from {} with {} sensor groups",
