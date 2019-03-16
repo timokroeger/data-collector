@@ -1,10 +1,8 @@
 use std::collections::{BTreeMap, HashMap};
-use std::io::Error;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use influx_db_client::{Point, Value};
-use log::warn;
-use modbus::{Client, Error as ModbusError};
+use modbus::{Client, Error};
 
 /// A Register map that has the register address as key and measurement name as value.
 pub struct RegisterMap {
@@ -83,20 +81,17 @@ impl<'a> Sensor<'a> {
         }
     }
 
+    pub fn id(&self) -> u8 {
+        self.id
+    }
+
     pub fn read_registers(&self, mb: &mut Client) -> Result<HashMap<u16, u16>, Error> {
         let mut result = HashMap::new();
 
         mb.set_slave(self.id);
         for param in self.registers.read_groups() {
-            match mb.read_input_registers(param.0, param.1) {
-                Ok(values) => {
-                    result.extend(&mut (param.0..param.0 + param.1).zip(values));
-                }
-                Err(e) => match e {
-                    ModbusError::Io(e) => return Err(e),
-                    _ => warn!("Modbus: {}", e),
-                },
-            }
+            let values = mb.read_input_registers(param.0, param.1)?;
+            result.extend(&mut (param.0..param.0 + param.1).zip(values));
         }
 
         Ok(result)

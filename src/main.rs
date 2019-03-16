@@ -2,7 +2,7 @@ mod config;
 mod sensor;
 
 use std::collections::BTreeMap;
-use std::io::Error;
+use std::io::{Error, ErrorKind};
 use std::thread;
 use std::time::Duration;
 
@@ -11,7 +11,7 @@ use config::*;
 use humantime;
 use influx_db_client::{Client as InfluxDbClient, Points, Precision};
 use log::{debug, error, info, warn};
-use modbus::{tcp::Transport, Client as ModbusClient};
+use modbus::{tcp::Transport, Client as ModbusClient, Error as ModbusError};
 use sensor::Sensor;
 
 fn connection_task(
@@ -41,8 +41,25 @@ fn connection_task(
         let mut points = Vec::new();
 
         for sensor in &mut sensors {
-            let register_values = sensor.read_registers(mb)?;
-            points.append(&mut sensor.get_points(&register_values));
+            match sensor.read_registers(mb) {
+                Ok(register_values) => points.append(&mut sensor.get_points(&register_values)),
+                Err(e) => match e {
+                    ModbusError::Exception(_)
+                    | ModbusError::InvalidData(_)
+                    | ModbusError::InvalidFunction => {
+                        error!("ModbusTCP: Sensor {}: {}", sensor.id(), e);
+                        panic!("Please check the connected sensors and the configuration.");
+                    }
+                    _ => warn!("ModbusTCP: Sensor {}: {}", sensor.id(), e),
+                },
+            }
+        }
+
+        if points.is_empty() {
+            return Err(Error::new(
+                ErrorKind::NotConnected,
+                "Error detected at each sensor",
+            ));
         }
 
         db.write_points(Points::create_new(points), Some(Precision::Seconds), None)
