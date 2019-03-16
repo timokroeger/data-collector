@@ -1,6 +1,6 @@
 # data-collector
 ![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/timokroeger/data-collector.svg)
-![GitHub](https://img.shields.io/github/license/timokroeger/data-collector.svg)
+![GitHub](https://img.shields.io/github/license/TimoKroeger/data-collector.svg)
 
 Configurable Modbus client which sends the collected data to InfluxDB.
 
