@@ -37,24 +37,24 @@ To create a database manually you can use the `influx` tool with tha `create dat
 #### The `username` and `password` fields
 Optional fields to configure credentials when authentication is enabled for InfluxDB.
 
-### Sensor [\<GROUP\>] sections
+### Sensor `[\<GROUP\>]` sections
 Every other top level section in the configuration file specifies a sensor group.
 A sensor group shares the same set of registers. Usually a group for each sensor type is used.
 
 #### The `scan_interval` field
-Polling interval for `measurement_registers`.
+Polling interval for all defined `measurement_registers`.
 Parses times in free form like: "1min 30s".
 
-#### The [\<GROUP\>.measurement_registers] section
-Table of name to register address mappings.
+#### The `[\<GROUP\>.measurement_registers]` section
+Name to register address mappings.
 The name is used as the measurement key when storing data points in InfluxDB.
-This mapping is shared among all sensors in the group.
+This mapping is shared among all sensors in this group.
 
-#### The [[\<GROUP\>.sensors]] array
+#### The `[[\<GROUP\>.sensors]]` array
 Array of sensors in this group.
 
 ##### The `id` field
 Modbus Slave ID/Unit ID of the sensor.
 
 ##### Other fields
-Optional tags that are stored alogside each datapoint of this sensor.
+Optional string tags which are stored alogside each datapoint of this sensor.
