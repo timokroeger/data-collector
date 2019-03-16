@@ -2,8 +2,9 @@
 name = "data-collector"
 version = "0.1.0"
 authors = ["Timo Kröger <timokroeger93@gmail.com>"]
-description = "Reads data points from a ModbusTCP server and stores them in InfluxDB"
+description = "Configurable Modbus client which sends the collected data to InfluxDB"
 edition = "2018"
+publish = false
 
 [dependencies]
 clap = "2"
