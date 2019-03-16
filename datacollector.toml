@@ -1,7 +1,7 @@
 [modbus]
 hostname = "127.0.0.1"
 port = 502
-timeout_sec = 1
+timeout = "1s"
 
 [influxdb]
 hostname = "http://localhost:8086"
@@ -10,7 +10,7 @@ username = "user"
 password = "pw"
 
 [group1]
-scan_interval_sec = 10
+scan_interval = "1m"
 
 [group1.measurement_registers]
 moisture = 0

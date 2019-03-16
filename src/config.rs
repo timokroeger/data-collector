@@ -20,7 +20,8 @@ pub struct Config {
 pub struct ModbusConfig {
     hostname: String,
     port: u16,
-    timeout_sec: u64,
+    #[serde(with = "serde_humantime")]
+    timeout: Duration,
 }
 
 #[derive(Deserialize)]
@@ -33,7 +34,8 @@ pub struct InfluxDbConfig {
 
 #[derive(Deserialize, Clone)]
 pub struct SensorGroupConfig {
-    pub scan_interval_sec: u64,
+    #[serde(with = "serde_humantime")]
+    pub scan_interval: Duration,
     pub measurement_registers: RegisterConfig,
     pub sensors: Vec<ConfigSensor>,
 }
@@ -62,9 +64,9 @@ impl From<ModbusConfig> for (String, ModbusTcpConfig) {
             cfg.hostname,
             ModbusTcpConfig {
                 tcp_port: cfg.port,
-                tcp_connect_timeout: Some(Duration::from_secs(cfg.timeout_sec)),
-                tcp_read_timeout: Some(Duration::from_secs(cfg.timeout_sec)),
-                tcp_write_timeout: Some(Duration::from_secs(cfg.timeout_sec)),
+                tcp_connect_timeout: Some(cfg.timeout),
+                tcp_read_timeout: Some(cfg.timeout),
+                tcp_write_timeout: Some(cfg.timeout),
                 modbus_uid: 0,
             },
         )

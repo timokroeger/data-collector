@@ -13,4 +13,5 @@ influx_db_client = "0.3"
 log = "0.4"
 modbus = { git = "https://github.com/TimoKroeger/modbus-rs", branch = "slave_id" }
 serde = { version = "1.0", features = ["derive"] }
+serde-humantime = "0.1"
 toml = "0.4"

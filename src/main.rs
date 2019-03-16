@@ -65,7 +65,7 @@ fn connection_task(
         db.write_points(Points::create_new(points), Some(Precision::Seconds), None)
             .unwrap_or_else(|e| warn!("InfluxDB: {}", e));
 
-        thread::sleep(Duration::from_secs(sensor_group.scan_interval_sec));
+        thread::sleep(sensor_group.scan_interval);
     }
 }
 
