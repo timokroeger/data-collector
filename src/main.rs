@@ -2,6 +2,7 @@ mod config;
 mod sensor;
 
 use std::collections::BTreeMap;
+use std::fs::File;
 use std::io::{Error, ErrorKind};
 use std::thread;
 use std::time::Duration;
@@ -13,6 +14,7 @@ use influx_db_client::{Client as InfluxDbClient, Points, Precision};
 use log::{debug, error, info, warn};
 use modbus::{tcp::Transport, Client as ModbusClient, Error as ModbusError};
 use sensor::Sensor;
+use simplelog::{Config as LogConfig, TermLogger, WriteLogger};
 
 fn connection_task(
     mb: &mut ModbusClient,
@@ -70,8 +72,7 @@ fn connection_task(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
-    env_logger::init();
-
+    // Parse command line arguments
     let matches = app_from_crate!()
         .arg(
             Arg::with_name("config")
@@ -82,7 +83,33 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
                 .default_value("datacollector.toml")
                 .help("Sets a custom config file"),
         )
+        .arg(
+            Arg::with_name("loglevel")
+                .long("loglevel")
+                .takes_value(true)
+                .default_value("warn")
+                .possible_values(&["off", "error", "warn", "info", "debug", "trace"])
+                .help("Sets the logging level"),
+        )
+        .arg(
+            Arg::with_name("logfile")
+                .long("logfile")
+                .takes_value(true)
+                .default_value("stderr/stdout")
+                .help("Sets a custom log file"),
+        )
         .get_matches();
+
+    // Setup logging
+    let mut log_config = LogConfig::default();
+    log_config.time_format = Some("%+");
+    let log_level = matches.value_of("loglevel").unwrap().parse().unwrap();
+    match matches.value_of("logfile") {
+        Some(logfile) => {
+            WriteLogger::init(log_level, log_config, File::create(logfile).unwrap()).unwrap()
+        }
+        None => TermLogger::init(log_level, log_config).unwrap(),
+    }
 
     let config_file = matches.value_of("config").unwrap();
     let config = Config::new(&config_file);
