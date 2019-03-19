@@ -85,7 +85,7 @@ impl<'a> Sensor<'a> {
         self.id
     }
 
-    pub fn read_registers(&self, mb: &mut Client) -> Result<HashMap<u16, u16>, Error> {
+    pub fn read_registers(&self, mb: &mut impl Client) -> Result<HashMap<u16, u16>, Error> {
         let mut result = HashMap::new();
 
         mb.set_slave(self.id);

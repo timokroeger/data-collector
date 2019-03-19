@@ -4,12 +4,12 @@ mod sensor;
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{Error, ErrorKind};
+use std::net::{TcpStream, ToSocketAddrs};
 use std::thread;
 use std::time::Duration;
 
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
 use config::*;
-use humantime;
 use influx_db_client::{Client as InfluxDbClient, Points, Precision};
 use log::{debug, error, info, warn};
 use modbus::{tcp::Transport, Client as ModbusClient, Error as ModbusError};
@@ -17,7 +17,7 @@ use sensor::Sensor;
 use simplelog::{Config as LogConfig, TermLogger, WriteLogger};
 
 fn connection_task(
-    mb: &mut ModbusClient,
+    mut mb: impl ModbusClient,
     db: &InfluxDbClient,
     sensor_groups: &BTreeMap<String, SensorGroupConfig>,
 ) -> Result<(), Error> {
@@ -43,16 +43,16 @@ fn connection_task(
         let mut points = Vec::new();
 
         for sensor in &mut sensors {
-            match sensor.read_registers(mb) {
+            match sensor.read_registers(&mut mb) {
                 Ok(register_values) => points.append(&mut sensor.get_points(&register_values)),
                 Err(e) => match e {
                     ModbusError::Exception(_)
                     | ModbusError::InvalidData(_)
                     | ModbusError::InvalidFunction => {
-                        error!("ModbusTCP: Sensor {}: {}", sensor.id(), e);
+                        error!("Modbus: Sensor {}: {}", sensor.id(), e);
                         panic!("Please check the connected sensors and the configuration.");
                     }
-                    _ => warn!("ModbusTCP: Sensor {}: {}", sensor.id(), e),
+                    _ => warn!("Modbus: Sensor {}: {}", sensor.id(), e),
                 },
             }
         }
@@ -69,6 +69,19 @@ fn connection_task(
 
         thread::sleep(sensor_group.scan_interval);
     }
+}
+
+fn connect(config: &ModbusConfig) -> Result<TcpStream, Error> {
+    let addr = (config.hostname.as_str(), config.port)
+        .to_socket_addrs()?
+        .next()
+        .ok_or(Error::new(ErrorKind::AddrNotAvailable, "Host not resolved"))?;
+    
+    let stream = TcpStream::connect(addr)?;
+    stream.set_read_timeout(Some(config.timeout))?;
+    stream.set_write_timeout(Some(config.timeout))?;
+    stream.set_nodelay(true)?;
+    Ok(stream)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
@@ -119,15 +132,18 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     );
 
     let db = config.influxdb.into_client();
-    let (modbus_hostname, modbus_config) = config.modbus.into();
 
     // Retry to connect forever
     loop {
-        debug!("ModbusTCP: Connecting to {}", modbus_hostname);
-        let e = match Transport::new_with_cfg(&modbus_hostname, modbus_config) {
-            Ok(mut mb) => {
-                info!("ModbusTCP: Successfully connected to {}", modbus_hostname);
-                connection_task(&mut mb, &db, &config.sensor_groups).unwrap_err()
+        debug!("ModbusTCP: Connecting to {}", config.modbus.hostname);
+        let e = match connect(&config.modbus) {
+            Ok(stream) => {
+                info!(
+                    "ModbusTCP: Successfully connected to {}",
+                    stream.peer_addr()?
+                );
+                let mb = Transport::new(Box::new(stream));
+                connection_task(mb, &db, &config.sensor_groups).unwrap_err()
             }
             Err(e) => e,
         };
