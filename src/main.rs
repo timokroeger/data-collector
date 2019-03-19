@@ -95,7 +95,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
             Arg::with_name("logfile")
                 .long("logfile")
                 .takes_value(true)
-                .default_value("stderr/stdout")
                 .help("Sets a custom log file"),
         )
         .get_matches();
