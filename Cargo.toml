@@ -15,4 +15,5 @@ modbus = { git = "https://github.com/TimoKroeger/modbus-rs", branch = "no_connec
 serde = { version = "1.0", features = ["derive"] }
 serde-humantime = "0.1"
 simplelog = "0.5"
+socket2 = "0.3"
 toml = "0.4"

@@ -15,6 +15,7 @@ use log::{debug, error, info, warn};
 use modbus::{tcp::Transport, Client as ModbusClient, Error as ModbusError};
 use sensor::Sensor;
 use simplelog::{Config as LogConfig, TermLogger, WriteLogger};
+use socket2::Socket;
 
 fn connection_task(
     mut mb: impl ModbusClient,
@@ -46,22 +47,13 @@ fn connection_task(
             match sensor.read_registers(&mut mb) {
                 Ok(register_values) => points.append(&mut sensor.get_points(&register_values)),
                 Err(e) => match e {
-                    ModbusError::Exception(_)
-                    | ModbusError::InvalidData(_)
-                    | ModbusError::InvalidFunction => {
-                        error!("Modbus: Sensor {}: {}", sensor.id(), e);
-                        panic!("Please check the connected sensors and the configuration.");
+                    ModbusError::Io(ref e) if e.kind() == ErrorKind::TimedOut => {
+                        warn!("Modbus: Sensor {}: {}", sensor.id(), e)
                     }
+                    ModbusError::Io(e) => return Err(e),
                     _ => warn!("Modbus: Sensor {}: {}", sensor.id(), e),
                 },
             }
-        }
-
-        if points.is_empty() {
-            return Err(Error::new(
-                ErrorKind::NotConnected,
-                "Error detected at each sensor",
-            ));
         }
 
         db.write_points(Points::create_new(points), Some(Precision::Seconds), None)
@@ -71,17 +63,18 @@ fn connection_task(
     }
 }
 
-fn connect(config: &ModbusConfig) -> Result<TcpStream, Error> {
+fn connect(config: &ModbusConfig, keepalive: Duration) -> Result<TcpStream, Error> {
     let addr = (config.hostname.as_str(), config.port)
         .to_socket_addrs()?
         .next()
         .ok_or(Error::new(ErrorKind::AddrNotAvailable, "Host not resolved"))?;
-    
-    let stream = TcpStream::connect(addr)?;
-    stream.set_read_timeout(Some(config.timeout))?;
-    stream.set_write_timeout(Some(config.timeout))?;
-    stream.set_nodelay(true)?;
-    Ok(stream)
+
+    let socket = Socket::from(TcpStream::connect(addr)?);
+    socket.set_read_timeout(Some(config.timeout))?;
+    socket.set_write_timeout(Some(config.timeout))?;
+    socket.set_nodelay(true)?;
+    socket.set_keepalive(Some(keepalive))?;
+    Ok(socket.into_tcp_stream())
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
@@ -133,10 +126,14 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
 
     let db = config.influxdb.into_client();
 
+    // Use scan interval of first group as keepalive interval.
+    // TODO: Use min of all groups as keepalive interval.
+    let keepalive = config.sensor_groups.values().next().unwrap().scan_interval;
+
     // Retry to connect forever
     loop {
         debug!("ModbusTCP: Connecting to {}", config.modbus.hostname);
-        let e = match connect(&config.modbus) {
+        let e = match connect(&config.modbus, keepalive) {
             Ok(stream) => {
                 info!(
                     "ModbusTCP: Successfully connected to {}",
