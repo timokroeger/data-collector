@@ -92,18 +92,20 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
                 .help("Sets a custom config file"),
         )
         .arg(
-            Arg::with_name("loglevel")
-                .long("loglevel")
-                .takes_value(true)
-                .default_value("warn")
-                .possible_values(&["off", "error", "warn", "info", "debug", "trace"])
-                .help("Sets the logging level"),
-        )
-        .arg(
             Arg::with_name("logfile")
                 .long("logfile")
                 .takes_value(true)
+                .value_name("FILE")
                 .help("Sets a custom log file"),
+        )
+        .arg(
+            Arg::with_name("loglevel")
+                .long("loglevel")
+                .takes_value(true)
+                .value_name("LEVEL")
+                .default_value("warn")
+                .possible_values(&["off", "error", "warn", "info", "debug", "trace"])
+                .help("Sets the logging level"),
         )
         .get_matches();
 

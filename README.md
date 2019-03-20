@@ -1,8 +1,22 @@
 # data-collector
-![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/timokroeger/data-collector.svg)
-![GitHub](https://img.shields.io/github/license/TimoKroeger/data-collector.svg)
+[![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/timokroeger/data-collector.svg)](https://hub.docker.com/r/timokroeger/data-collector/builds)
 
 Configurable Modbus client which sends the collected data to InfluxDB.
+
+## Usage
+
+    USAGE:
+        data-collector.exe [OPTIONS]
+
+    FLAGS:
+        -h, --help       Prints help information
+        -V, --version    Prints version information
+
+    OPTIONS:
+        -c, --config <FILE>       Sets a custom config file [default: datacollector.toml]
+            --logfile <FILE>      Sets a custom log file
+            --loglevel <LEVEL>    Sets the logging level [default: warn]
+                                  [possible values: off, error, warn, info, debug, trace]
 
 ## Configuration
 
