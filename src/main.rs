@@ -47,7 +47,9 @@ fn connection_task(
             match sensor.read_registers(&mut mb) {
                 Ok(register_values) => points.append(&mut sensor.get_points(&register_values)),
                 Err(e) => match e {
-                    ModbusError::Io(ref e) if e.kind() == ErrorKind::TimedOut => {
+                    ModbusError::Io(ref e)
+                        if e.kind() == ErrorKind::TimedOut || e.kind() == ErrorKind::WouldBlock =>
+                    {
                         warn!("Modbus: Sensor {}: {}", sensor.id(), e)
                     }
                     ModbusError::Io(e) => return Err(e),
@@ -108,12 +110,13 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     // Setup logging
     let mut log_config = LogConfig::default();
     log_config.time_format = Some("%+");
-    let log_level = matches.value_of("loglevel").unwrap().parse().unwrap();
+    let log_level = matches.value_of("loglevel").unwrap().parse()?;
     match matches.value_of("logfile") {
         Some(logfile) => {
-            WriteLogger::init(log_level, log_config, File::create(logfile).unwrap()).unwrap()
+            let log_file = File::create(logfile)?;
+            WriteLogger::init(log_level, log_config, log_file)?
         }
-        None => TermLogger::init(log_level, log_config).unwrap(),
+        None => TermLogger::init(log_level, log_config)?,
     }
 
     let config_file = matches.value_of("config").unwrap();
