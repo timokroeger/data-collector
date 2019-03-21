@@ -91,7 +91,7 @@ impl<'a> Sensor<'a> {
         mb.set_uid(self.id);
         for param in self.registers.read_groups() {
             let values = mb.read_input_registers(param.0, param.1)?;
-            result.extend(&mut (param.0..param.0 + param.1).zip(values));
+            result.extend(&mut (param.0..).zip(values));
         }
 
         Ok(result)
