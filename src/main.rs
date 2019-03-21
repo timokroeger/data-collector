@@ -122,12 +122,14 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     );
 
     let db = config.influxdb.into_client();
-    let (modbus_hostname, modbus_config) = config.modbus.into();
+
+    let modbus_hostname = &config.modbus.hostname;
+    let modbus_config = config.modbus.to_modbus_tcp_config();
 
     // Retry to connect forever
     loop {
         debug!("ModbusTCP: Connecting to {}", modbus_hostname);
-        let e = match Transport::new_with_cfg(&modbus_hostname, modbus_config) {
+        let e = match Transport::new_with_cfg(modbus_hostname, modbus_config) {
             Ok(mb) => {
                 info!("ModbusTCP: Successfully connected to {}", modbus_hostname);
                 connection_task(mb, &db, &config.sensor_groups).unwrap_err()

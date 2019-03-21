@@ -16,12 +16,31 @@ pub struct Config {
     pub sensor_groups: BTreeMap<String, SensorGroupConfig>,
 }
 
+impl Config {
+    pub fn new(filename: &str) -> Self {
+        let config_str = fs::read_to_string(filename).unwrap();
+        toml::from_str(&config_str).unwrap()
+    }
+}
+
 #[derive(Deserialize)]
 pub struct ModbusConfig {
-    hostname: String,
-    port: u16,
+    pub hostname: String,
+    pub port: u16,
     #[serde(with = "serde_humantime")]
-    timeout: Duration,
+    pub timeout: Duration,
+}
+
+impl ModbusConfig {
+    pub fn to_modbus_tcp_config(&self) -> ModbusTcpConfig {
+        ModbusTcpConfig {
+            tcp_port: self.port,
+            tcp_connect_timeout: None,
+            tcp_read_timeout: Some(self.timeout),
+            tcp_write_timeout: Some(self.timeout),
+            modbus_uid: 0,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -30,6 +49,16 @@ pub struct InfluxDbConfig {
     database: String,
     username: Option<String>,
     password: Option<String>,
+}
+
+impl InfluxDbConfig {
+    pub fn into_client(self) -> Client {
+        let client = Client::new(self.hostname, self.database);
+        match (self.username, self.password) {
+            (Some(username), Some(password)) => client.set_authentication(username, password),
+            (_, _) => client,
+        }
+    }
 }
 
 #[derive(Deserialize, Clone)]
@@ -43,36 +72,6 @@ pub struct SensorGroupConfig {
 #[derive(Deserialize, Clone)]
 pub struct RegisterConfig(BTreeMap<String, u16>);
 
-#[derive(Deserialize, Clone)]
-pub struct ConfigSensor {
-    pub id: u8,
-
-    #[serde(flatten)]
-    pub tags: BTreeMap<String, toml::Value>,
-}
-
-impl Config {
-    pub fn new(filename: &str) -> Self {
-        let config_str = fs::read_to_string(filename).unwrap();
-        toml::from_str(&config_str).unwrap()
-    }
-}
-
-impl From<ModbusConfig> for (String, ModbusTcpConfig) {
-    fn from(cfg: ModbusConfig) -> Self {
-        (
-            cfg.hostname,
-            ModbusTcpConfig {
-                tcp_port: cfg.port,
-                tcp_connect_timeout: Some(cfg.timeout),
-                tcp_read_timeout: Some(cfg.timeout),
-                tcp_write_timeout: Some(cfg.timeout),
-                modbus_uid: 0,
-            },
-        )
-    }
-}
-
 impl RegisterConfig {
     pub fn into_register_map(self) -> RegisterMap {
         // Swap key and value of the toml configuration table
@@ -80,12 +79,10 @@ impl RegisterConfig {
     }
 }
 
-impl InfluxDbConfig {
-    pub fn into_client(self) -> Client {
-        let client = Client::new(self.hostname, self.database);
-        match (self.username, self.password) {
-            (Some(username), Some(password)) => client.set_authentication(username, password),
-            (_, _) => client,
-        }
-    }
+#[derive(Deserialize, Clone)]
+pub struct ConfigSensor {
+    pub id: u8,
+
+    #[serde(flatten)]
+    pub tags: BTreeMap<String, toml::Value>,
 }
