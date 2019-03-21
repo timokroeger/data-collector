@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use crate::sensor::RegisterMap;
 use influx_db_client::Client;
+use modbus::tcp::Config as ModbusTcpConfig;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -17,10 +18,10 @@ pub struct Config {
 
 #[derive(Deserialize)]
 pub struct ModbusConfig {
-    pub hostname: String,
-    pub port: u16,
+    hostname: String,
+    port: u16,
     #[serde(with = "serde_humantime")]
-    pub timeout: Duration,
+    timeout: Duration,
 }
 
 #[derive(Deserialize)]
@@ -54,6 +55,21 @@ impl Config {
     pub fn new(filename: &str) -> Self {
         let config_str = fs::read_to_string(filename).unwrap();
         toml::from_str(&config_str).unwrap()
+    }
+}
+
+impl From<ModbusConfig> for (String, ModbusTcpConfig) {
+    fn from(cfg: ModbusConfig) -> Self {
+        (
+            cfg.hostname,
+            ModbusTcpConfig {
+                tcp_port: cfg.port,
+                tcp_connect_timeout: Some(cfg.timeout),
+                tcp_read_timeout: Some(cfg.timeout),
+                tcp_write_timeout: Some(cfg.timeout),
+                modbus_uid: 0,
+            },
+        )
     }
 }
 

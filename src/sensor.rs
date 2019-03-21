@@ -88,7 +88,7 @@ impl<'a> Sensor<'a> {
     pub fn read_registers(&self, mb: &mut impl Client) -> Result<HashMap<u16, u16>, Error> {
         let mut result = HashMap::new();
 
-        mb.set_slave(self.id);
+        mb.set_uid(self.id);
         for param in self.registers.read_groups() {
             let values = mb.read_input_registers(param.0, param.1)?;
             result.extend(&mut (param.0..param.0 + param.1).zip(values));
