@@ -10,51 +10,39 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
 use config::*;
 use humantime;
-use influx_db_client::{Client as InfluxDbClient, Point, Points, Precision, Value};
 use log::{debug, error, info, warn};
 use modbus::{tcp::Transport, Client as ModbusClient, Error as ModbusError};
 use sensor::Sensor;
 use simplelog::{Config as LogConfig, TermLogger, WriteLogger};
 
-fn new_influxdb_point(
-    measurement: &str,
-    timestamp: SystemTime,
-    value: u16,
-    tags: &[(String, String)],
-) -> Point {
-    let mut p = Point::new(measurement);
-    p.add_field("value", Value::Integer(i64::from(value)));
-    for (k, v) in tags {
-        p.add_tag(k, Value::String(v.clone()));
-    }
-    p.add_timestamp(timestamp.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64);
-    p
-}
-
-fn get_influxdb_points(sensor: &Sensor, register_values: &HashMap<u16, u16>) -> Vec<Point> {
-    let mut points = Vec::new();
-
+fn get_influxdb_lines(sensor: &Sensor, register_values: &HashMap<u16, u16>) -> String {
+    let mut lines = String::new();
     for (&reg_addr, &value) in register_values {
-        let mut tags = Vec::new();
-        tags.push(("group".to_string(), sensor.group.to_string()));
-        tags.push(("id".to_string(), sensor.id.to_string()));
-        tags.push(("register".to_string(), reg_addr.to_string()));
-        tags.append(&mut sensor.tags.clone());
-
-        points.push(new_influxdb_point(
+        let mut line = format!(
+            "{},group={},id={},register={}",
             &sensor.registers.get_name(reg_addr),
-            SystemTime::now(),
+            sensor.group,
+            sensor.id,
+            reg_addr
+        );
+        for (k, v) in &sensor.tags {
+            line.push_str(&format!(",{}={}", k, v));
+        }
+        line.push_str(&format!(
+            " value={} {}",
             value,
-            &tags,
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
         ));
+        lines.push_str(&line);
     }
-
-    points
+    lines
 }
 
 fn connection_task(
     mut mb: impl ModbusClient,
-    db: &InfluxDbClient,
     sensor_groups: &BTreeMap<String, SensorGroupConfig>,
 ) -> Result<(), Error> {
     // TODO: Support more than one sensor group
@@ -82,12 +70,12 @@ fn connection_task(
     }
 
     loop {
-        let mut points = Vec::new();
+        let mut lines = String::new();
 
         for sensor in &mut sensors {
             match sensor.read_registers(&mut mb) {
                 Ok(register_values) => {
-                    points.append(&mut get_influxdb_points(&sensor, &register_values))
+                    lines.push_str(&get_influxdb_lines(&sensor, &register_values))
                 }
                 Err(e) => match e {
                     ModbusError::Exception(_)
@@ -101,15 +89,14 @@ fn connection_task(
             }
         }
 
-        if points.is_empty() {
+        if lines.is_empty() {
             return Err(Error::new(
                 ErrorKind::NotConnected,
                 "Error detected at each sensor",
             ));
         }
 
-        db.write_points(Points::create_new(points), Some(Precision::Seconds), None)
-            .unwrap_or_else(|e| warn!("InfluxDB: {}", e));
+        // TODO: Write lines with the InfluxDB http api
 
         thread::sleep(sensor_group.scan_interval);
     }
@@ -165,8 +152,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
         config.sensor_groups.len()
     );
 
-    let db = config.influxdb.into_client();
-
     let modbus_hostname = &config.modbus.hostname;
     let modbus_config = config.modbus.to_modbus_tcp_config();
 
@@ -176,7 +161,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
         let e = match Transport::new_with_cfg(modbus_hostname, modbus_config) {
             Ok(mb) => {
                 info!("ModbusTCP: Successfully connected to {}", modbus_hostname);
-                connection_task(mb, &db, &config.sensor_groups).unwrap_err()
+                connection_task(mb, &config.sensor_groups).unwrap_err()
             }
             Err(e) => e,
         };
