@@ -10,8 +10,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
 use config::*;
 use humantime;
-use influx_db_client::{Client as InfluxDbClient, Points, Precision};
-use influx_db_client::{Point, Value};
+use influx_db_client::{Client as InfluxDbClient, Point, Points, Precision, Value};
 use log::{debug, error, info, warn};
 use modbus::{tcp::Transport, Client as ModbusClient, Error as ModbusError};
 use sensor::Sensor;
@@ -68,11 +67,12 @@ fn connection_task(
 
     let mut sensors = Vec::new();
     for sensor in &sensor_group.sensors {
-        let tags = sensor
-            .tags
-            .iter()
-            .map(|(k, v)| (k.clone(), v.to_string()))
-            .collect();
+        // Convert all tag values to strings
+        let mut tags = Vec::new();
+        for (k, v) in &sensor.tags {
+            tags.push((k.clone(), v.to_string()));
+        }
+
         sensors.push(Sensor {
             id: sensor.id,
             group: &group,
