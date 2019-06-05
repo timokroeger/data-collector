@@ -12,6 +12,7 @@ use config::*;
 use humantime;
 use log::{debug, error, info, warn};
 use modbus::{tcp::Transport, Client as ModbusClient, Error as ModbusError};
+use reqwest::{Client as HttpClient, RequestBuilder};
 use sensor::Sensor;
 use simplelog::{Config as LogConfig, TermLogger, WriteLogger};
 
@@ -43,6 +44,7 @@ fn get_influxdb_lines(sensor: &Sensor, register_values: &HashMap<u16, u16>) -> S
 
 fn connection_task(
     mut mb: impl ModbusClient,
+    http_req: RequestBuilder,
     sensor_groups: &BTreeMap<String, SensorGroupConfig>,
 ) -> Result<(), Error> {
     // TODO: Support more than one sensor group
@@ -96,7 +98,15 @@ fn connection_task(
             ));
         }
 
-        // TODO: Write lines with the InfluxDB http api
+        let resp = http_req.try_clone().unwrap().body(lines).send();
+        match resp {
+            Ok(resp) => {
+                if !resp.status().is_success() {
+                    warn!("InfluxDB Response: {:?}", resp);
+                }
+            }
+            Err(e) => warn!("InfluxDB: {}", e),
+        }
 
         thread::sleep(sensor_group.scan_interval);
     }
@@ -155,13 +165,25 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     let modbus_hostname = &config.modbus.hostname;
     let modbus_config = config.modbus.to_modbus_tcp_config();
 
+    let client = HttpClient::new();
+    let req = client
+        .post(&format!("{}/write", config.influxdb.hostname))
+        .query(&[
+            ("database", config.influxdb.database),
+            ("precision", String::from("s")),
+        ]);
+    let req = match (config.influxdb.username, config.influxdb.password) {
+        (Some(username), Some(password)) => req.query(&[("u", username), ("p", password)]),
+        (_, _) => req,
+    };
+
     // Retry to connect forever
     loop {
         debug!("ModbusTCP: Connecting to {}", modbus_hostname);
         let e = match Transport::new_with_cfg(modbus_hostname, modbus_config) {
             Ok(mb) => {
                 info!("ModbusTCP: Successfully connected to {}", modbus_hostname);
-                connection_task(mb, &config.sensor_groups).unwrap_err()
+                connection_task(mb, req.try_clone().unwrap(), &config.sensor_groups).unwrap_err()
             }
             Err(e) => e,
         };

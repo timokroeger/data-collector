@@ -44,10 +44,10 @@ impl ModbusConfig {
 
 #[derive(Deserialize)]
 pub struct InfluxDbConfig {
-    hostname: String,
-    database: String,
-    username: Option<String>,
-    password: Option<String>,
+    pub hostname: String,
+    pub database: String,
+    pub username: Option<String>,
+    pub password: Option<String>,
 }
 
 #[derive(Deserialize, Clone)]

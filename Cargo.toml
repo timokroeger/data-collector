@@ -11,6 +11,7 @@ clap = "2"
 humantime = "1.2"
 log = "0.4"
 modbus = { git = "https://github.com/TimoKroeger/modbus-rs", branch = "slave_id" }
+reqwest = "0.9"
 serde = { version = "1.0", features = ["derive"] }
 serde-humantime = "0.1"
 simplelog = "0.5"
