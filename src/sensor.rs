@@ -1,7 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
-use std::time::{SystemTime, UNIX_EPOCH};
 
-use influx_db_client::{Point, Value};
 use modbus::{Client, Error};
 
 /// A Register map that has the register address as key and measurement name as value.
@@ -44,21 +42,6 @@ impl RegisterMap {
     }
 }
 
-fn new_influxdb_point(
-    measurement: &str,
-    timestamp: SystemTime,
-    value: u16,
-    tags: &[(String, String)],
-) -> Point {
-    let mut p = Point::new(measurement);
-    p.add_field("value", Value::Integer(i64::from(value)));
-    for (k, v) in tags {
-        p.add_tag(k, Value::String(v.clone()));
-    }
-    p.add_timestamp(timestamp.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64);
-    p
-}
-
 pub struct Sensor<'a> {
     pub id: u8,
     pub group: &'a str,
@@ -77,26 +60,5 @@ impl<'a> Sensor<'a> {
         }
 
         Ok(result)
-    }
-
-    pub fn get_points(&self, register_values: &HashMap<u16, u16>) -> Vec<Point> {
-        let mut points = Vec::new();
-
-        for (&reg_addr, &value) in register_values {
-            let mut tags = Vec::new();
-            tags.push(("group".to_string(), self.group.to_string()));
-            tags.push(("id".to_string(), self.id.to_string()));
-            tags.push(("register".to_string(), reg_addr.to_string()));
-            tags.append(&mut self.tags.clone());
-
-            points.push(new_influxdb_point(
-                &self.registers.get_name(reg_addr),
-                SystemTime::now(),
-                value,
-                &tags,
-            ));
-        }
-
-        points
     }
 }

@@ -1,20 +1,57 @@
 mod config;
 mod sensor;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{Error, ErrorKind};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
 use config::*;
 use humantime;
 use influx_db_client::{Client as InfluxDbClient, Points, Precision};
+use influx_db_client::{Point, Value};
 use log::{debug, error, info, warn};
 use modbus::{tcp::Transport, Client as ModbusClient, Error as ModbusError};
 use sensor::Sensor;
 use simplelog::{Config as LogConfig, TermLogger, WriteLogger};
+
+fn new_influxdb_point(
+    measurement: &str,
+    timestamp: SystemTime,
+    value: u16,
+    tags: &[(String, String)],
+) -> Point {
+    let mut p = Point::new(measurement);
+    p.add_field("value", Value::Integer(i64::from(value)));
+    for (k, v) in tags {
+        p.add_tag(k, Value::String(v.clone()));
+    }
+    p.add_timestamp(timestamp.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64);
+    p
+}
+
+fn get_influxdb_points(sensor: &Sensor, register_values: &HashMap<u16, u16>) -> Vec<Point> {
+    let mut points = Vec::new();
+
+    for (&reg_addr, &value) in register_values {
+        let mut tags = Vec::new();
+        tags.push(("group".to_string(), sensor.group.to_string()));
+        tags.push(("id".to_string(), sensor.id.to_string()));
+        tags.push(("register".to_string(), reg_addr.to_string()));
+        tags.append(&mut sensor.tags.clone());
+
+        points.push(new_influxdb_point(
+            &sensor.registers.get_name(reg_addr),
+            SystemTime::now(),
+            value,
+            &tags,
+        ));
+    }
+
+    points
+}
 
 fn connection_task(
     mut mb: impl ModbusClient,
@@ -49,7 +86,9 @@ fn connection_task(
 
         for sensor in &mut sensors {
             match sensor.read_registers(&mut mb) {
-                Ok(register_values) => points.append(&mut sensor.get_points(&register_values)),
+                Ok(register_values) => {
+                    points.append(&mut get_influxdb_points(&sensor, &register_values))
+                }
                 Err(e) => match e {
                     ModbusError::Exception(_)
                     | ModbusError::InvalidData(_)
