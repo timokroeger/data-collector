@@ -60,31 +60,13 @@ fn new_influxdb_point(
 }
 
 pub struct Sensor<'a> {
-    id: u8,
-    group: &'a str,
-    registers: &'a RegisterMap,
-    tags: Vec<(String, String)>,
+    pub id: u8,
+    pub group: &'a str,
+    pub registers: &'a RegisterMap,
+    pub tags: Vec<(String, String)>,
 }
 
 impl<'a> Sensor<'a> {
-    pub fn new(
-        id: u8,
-        group: &'a str,
-        registers: &'a RegisterMap,
-        tags: Vec<(String, String)>,
-    ) -> Self {
-        Self {
-            id,
-            group,
-            registers,
-            tags,
-        }
-    }
-
-    pub fn id(&self) -> u8 {
-        self.id
-    }
-
     pub fn read_registers(&self, mb: &mut impl Client) -> Result<HashMap<u16, u16>, Error> {
         let mut result = HashMap::new();
 

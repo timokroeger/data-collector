@@ -36,7 +36,12 @@ fn connection_task(
             .iter()
             .map(|(k, v)| (k.clone(), v.to_string()))
             .collect();
-        sensors.push(Sensor::new(sensor.id, &group, &register_map, tags));
+        sensors.push(Sensor {
+            id: sensor.id,
+            group: &group,
+            registers: &register_map,
+            tags,
+        });
     }
 
     loop {
@@ -49,10 +54,10 @@ fn connection_task(
                     ModbusError::Exception(_)
                     | ModbusError::InvalidData(_)
                     | ModbusError::InvalidFunction => {
-                        error!("ModbusTCP: Sensor {}: {}", sensor.id(), e);
+                        error!("ModbusTCP: Sensor {}: {}", sensor.id, e);
                         panic!("Please check the connected sensors and the configuration.");
                     }
-                    _ => warn!("ModbusTCP: Sensor {}: {}", sensor.id(), e),
+                    _ => warn!("ModbusTCP: Sensor {}: {}", sensor.id, e),
                 },
             }
         }
