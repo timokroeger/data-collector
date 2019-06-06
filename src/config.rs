@@ -9,7 +9,8 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 pub struct Config {
     pub modbus: ModbusConfig,
-    pub influxdb: InfluxDbConfig,
+    pub influxdb: Option<InfluxDbConfig>,
+    pub influxdb2: Option<InfluxDb2Config>,
 
     #[serde(flatten)]
     pub sensor_groups: BTreeMap<String, SensorGroupConfig>,
@@ -48,6 +49,14 @@ pub struct InfluxDbConfig {
     pub database: String,
     pub username: Option<String>,
     pub password: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct InfluxDb2Config {
+    pub hostname: String,
+    pub organization: String,
+    pub bucket: String,
+    pub auth_token: String,
 }
 
 #[derive(Deserialize, Clone)]

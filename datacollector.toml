@@ -3,11 +3,17 @@ hostname = "127.0.0.1"
 port = 502
 timeout = "1s"
 
-[influxdb]
-hostname = "http://localhost:8086"
-database = "db"
-username = "user"
-password = "pw"
+# [influxdb]
+# hostname = "http://localhost:8086"
+# database = "db"
+# username = "user"
+# password = "pw"
+
+[influxdb2]
+hostname = "http://localhost:9999/api/v2"
+organization = "testorg"
+bucket = "testbucket"
+auth_token = "Ef_IVxTOA3c6YVCMN9_W5AMTjeJBiw3JG8jH3pACgBd0JtUf-5xntHBFJHkjcH8VfF4FmsFFvIA9_nGbMdLwvQ=="
 
 [group1]
 scan_interval = "1m"
