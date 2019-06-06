@@ -77,9 +77,15 @@ fn connection_task(
     let mut sensors = Vec::new();
     for sensor in &sensor_group.sensors {
         // Convert all tag values to strings
-        let mut tags = Vec::new();
+        let mut tags: Vec<(String, String)> = Vec::new();
         for (k, v) in &sensor.tags {
-            tags.push((k.clone(), v.to_string()));
+            tags.push((
+                k.clone(),
+                match v {
+                    toml::Value::String(s) => s.clone(),
+                    _ => v.to_string(),
+                },
+            ));
         }
 
         sensors.push(Sensor {

@@ -15,4 +15,4 @@ reqwest = "0.9"
 serde = { version = "1.0", features = ["derive"] }
 serde-humantime = "0.1"
 simplelog = "0.5"
-toml = "0.4"
+toml = "0.5"
