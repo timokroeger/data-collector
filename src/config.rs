@@ -3,7 +3,6 @@ use std::fs;
 use std::time::Duration;
 
 use crate::sensor::RegisterMap;
-use influx_db_client::Client;
 use modbus::tcp::Config as ModbusTcpConfig;
 use serde::Deserialize;
 
@@ -45,20 +44,10 @@ impl ModbusConfig {
 
 #[derive(Deserialize)]
 pub struct InfluxDbConfig {
-    hostname: String,
-    database: String,
-    username: Option<String>,
-    password: Option<String>,
-}
-
-impl InfluxDbConfig {
-    pub fn into_client(self) -> Client {
-        let client = Client::new(self.hostname, self.database);
-        match (self.username, self.password) {
-            (Some(username), Some(password)) => client.set_authentication(username, password),
-            (_, _) => client,
-        }
-    }
+    pub hostname: String,
+    pub database: String,
+    pub username: Option<String>,
+    pub password: Option<String>,
 }
 
 #[derive(Deserialize, Clone)]
