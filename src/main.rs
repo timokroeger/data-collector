@@ -217,3 +217,36 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
         thread::sleep(delay);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sensor::RegisterMap;
+
+    #[test]
+    fn test_get_influxdb_lines() {
+        let mut reg_map = BTreeMap::new();
+        reg_map.insert(0, String::from("reg0"));
+        reg_map.insert(1, String::from("reg1"));
+        let reg_map = RegisterMap::new(reg_map);
+
+        let tags = vec![
+            (String::from("tag1"), String::from("value1")),
+            (String::from("tag2"), String::from("value2")),
+        ];
+
+        let sensor = Sensor {
+            id: 1,
+            group: "mygroup",
+            registers: &reg_map,
+            tags,
+        };
+
+        let mut reg_values = HashMap::new();
+        reg_values.insert(0, 100);
+        reg_values.insert(1, 101);
+
+        let lines = get_influxdb_lines(&sensor, &reg_values);
+        print!("{}", lines);
+    }
+}
