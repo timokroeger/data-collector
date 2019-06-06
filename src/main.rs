@@ -16,27 +16,46 @@ use reqwest::{Client as HttpClient, RequestBuilder};
 use sensor::Sensor;
 use simplelog::{Config as LogConfig, TermLogger, WriteLogger};
 
+fn influxdb_line(
+    measurement: &str,
+    tags: &Vec<(&str, &str)>,
+    value: u16,
+    timestamp: u64,
+) -> String {
+    let mut line = String::from(measurement);
+    for (k, v) in tags {
+        line.push_str(&format!(",{}={}", k, v));
+    }
+    line.push_str(&format!(" value={} {}\n", value, timestamp));
+    line
+}
+
 fn get_influxdb_lines(sensor: &Sensor, register_values: &HashMap<u16, u16>) -> String {
     let mut lines = String::new();
     for (&reg_addr, &value) in register_values {
-        let mut line = format!(
-            "{},group={},id={},register={}",
-            &sensor.registers.get_name(reg_addr),
-            sensor.group,
-            sensor.id,
-            reg_addr
-        );
-        for (k, v) in &sensor.tags {
-            line.push_str(&format!(",{}={}", k, v));
+        let mut tags = Vec::new();
+
+        tags.push(("group", sensor.group));
+
+        let id_str = sensor.id.to_string();
+        tags.push(("id", &id_str));
+
+        let reg_str = reg_addr.to_string();
+        tags.push(("register", &reg_str));
+
+        for t in &sensor.tags {
+            tags.push((&t.0, &t.1));
         }
-        line.push_str(&format!(
-            " value={} {}",
+
+        let line = influxdb_line(
+            &sensor.registers.get_name(reg_addr),
+            &tags,
             value,
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
-                .as_secs()
-        ));
+                .as_secs(),
+        );
         lines.push_str(&line);
     }
     lines
