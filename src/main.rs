@@ -22,9 +22,12 @@ fn influxdb_line(
     value: u16,
     timestamp: u64,
 ) -> String {
-    let mut line = String::from(measurement);
+    let escape_meas = |s: &str| s.replace(',', "\\,").replace(' ', "\\ ");
+    let escape_tag = |s: &str| escape_meas(s).replace('=', "\\=");
+
+    let mut line = escape_meas(measurement);
     for (k, v) in tags {
-        line.push_str(&format!(",{}={}", k, v));
+        line.push_str(&format!(",{}={}", escape_tag(k), escape_tag(v)));
     }
     line.push_str(&format!(" value={} {}\n", value, timestamp));
     line
@@ -194,7 +197,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     let req = client
         .post(&format!("{}/write", config.influxdb.hostname))
         .query(&[
-            ("database", config.influxdb.database),
+            ("db", config.influxdb.database),
             ("precision", String::from("s")),
         ]);
     let req = match (config.influxdb.username, config.influxdb.password) {
