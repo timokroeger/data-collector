@@ -194,16 +194,23 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     let modbus_config = config.modbus.to_modbus_tcp_config();
 
     let client = HttpClient::new();
-    let req = client
-        .post(&format!("{}/write", config.influxdb.hostname))
-        .query(&[
-            ("db", config.influxdb.database),
-            ("precision", String::from("s")),
-        ]);
-    let req = match (config.influxdb.username, config.influxdb.password) {
-        (Some(username), Some(password)) => req.query(&[("u", username), ("p", password)]),
-        (_, _) => req,
+    let req = if let Some(influx) = config.influxdb {
+        let req = client
+            .post(&format!("{}/write", influx.hostname))
+            .query(&[("db", influx.database)]);
+        match (influx.username, influx.password) {
+            (Some(username), Some(password)) => req.query(&[("u", username), ("p", password)]),
+            (_, _) => req,
+        }
+    } else if let Some(influx2) = config.influxdb2 {
+        client
+            .post(&format!("{}/write", influx2.hostname))
+            .query(&[("org", influx2.organization), ("bucket", influx2.bucket)])
+            .header("Authorization", format!("Token {}", influx2.auth_token))
+    } else {
+        panic!("No influxdb configuration found!");
     };
+    let req = req.query(&[("precision", "s")]);
 
     // Retry to connect forever
     loop {
