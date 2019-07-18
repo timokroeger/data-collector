@@ -3,7 +3,6 @@ use std::fs;
 use std::time::Duration;
 
 use crate::sensor::RegisterMap;
-use modbus::tcp::Config as ModbusTcpConfig;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -29,18 +28,6 @@ pub struct ModbusConfig {
     pub port: u16,
     #[serde(with = "serde_humantime")]
     pub timeout: Duration,
-}
-
-impl ModbusConfig {
-    pub fn to_modbus_tcp_config(&self) -> ModbusTcpConfig {
-        ModbusTcpConfig {
-            tcp_port: self.port,
-            tcp_connect_timeout: None,
-            tcp_read_timeout: Some(self.timeout),
-            tcp_write_timeout: Some(self.timeout),
-            modbus_uid: 0,
-        }
-    }
 }
 
 #[derive(Deserialize)]

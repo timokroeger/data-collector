@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
+use std::io::Error;
 
-use modbus::{Client, Error};
+use tokio_modbus::prelude::*;
 
 /// A Register map that has the register address as key and measurement name as value.
 pub struct RegisterMap {
@@ -50,10 +51,10 @@ pub struct Sensor<'a> {
 }
 
 impl<'a> Sensor<'a> {
-    pub fn read_registers(&self, mb: &mut impl Client) -> Result<HashMap<u16, u16>, Error> {
+    pub fn read_registers(&self, mb: &mut impl SyncReader) -> Result<HashMap<u16, u16>, Error> {
         let mut result = HashMap::new();
 
-        mb.set_uid(self.id);
+        mb.set_slave(Slave(self.id));
         for param in self.registers.read_groups() {
             let values = mb.read_input_registers(param.0, param.1)?;
             result.extend(&mut (param.0..).zip(values));
