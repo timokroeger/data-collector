@@ -7,7 +7,7 @@ use serde::Deserialize;
 
 #[derive(Deserialize)]
 pub struct Config {
-    pub modbus: ModbusConfig,
+    pub modbus: Option<ModbusConfig>,
     pub influxdb: Option<InfluxDbConfig>,
     pub influxdb2: Option<InfluxDb2Config>,
 

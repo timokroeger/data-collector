@@ -182,9 +182,21 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
         config.sensor_groups.len()
     );
 
-    let modbus_hostname = format!("{}:{}", &config.modbus.hostname, &config.modbus.port);
-    let modbus_hostaddr = modbus_hostname.parse().unwrap();
-    // TODO: Use the timeout value from the configuration file.
+    let connect_fn = if let Some(mb_tcp_cfg) = config.modbus {
+        let modbus_hostname = format!("{}:{}", mb_tcp_cfg.hostname, mb_tcp_cfg.port);
+        let modbus_hostaddr = modbus_hostname.parse().unwrap();
+        // TODO: Use the timeout value from the configuration file.
+
+        move || {
+            debug!("ModbusTCP: Connecting to {}", modbus_hostname);
+            sync::tcp::connect(modbus_hostaddr).map(|c| {
+                info!("ModbusTCP: Successfully connected to {}", modbus_hostname);
+                c
+            })
+        }
+    } else {
+        panic!("No modbus configuration found!");
+    };
 
     let client = HttpClient::new();
     let req = if let Some(influx) = config.influxdb {
@@ -207,10 +219,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
 
     // Retry to connect forever
     loop {
-        debug!("ModbusTCP: Connecting to {}", modbus_hostname);
-        let e = match sync::tcp::connect(modbus_hostaddr) {
+        let e = match connect_fn() {
             Ok(mb) => {
-                info!("ModbusTCP: Successfully connected to {}", modbus_hostname);
                 connection_task(mb, req.try_clone().unwrap(), &config.sensor_groups).unwrap_err()
             }
             Err(e) => e,
