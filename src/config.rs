@@ -8,6 +8,7 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 pub struct Config {
     pub modbus: Option<ModbusConfig>,
+    pub modbus_rtu: Option<ModbusRtuConfig>,
     pub influxdb: Option<InfluxDbConfig>,
     pub influxdb2: Option<InfluxDb2Config>,
 
@@ -28,6 +29,11 @@ pub struct ModbusConfig {
     pub port: u16,
     #[serde(with = "serde_humantime")]
     pub timeout: Duration,
+}
+
+#[derive(Deserialize)]
+pub struct ModbusRtuConfig {
+    pub port: String,
 }
 
 #[derive(Deserialize)]

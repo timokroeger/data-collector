@@ -3,6 +3,9 @@ hostname = "127.0.0.1"
 port = 502
 timeout = "1s"
 
+# [modbus_rtu]
+# port = "COM1"
+
 # [influxdb]
 # hostname = "http://localhost:8086"
 # database = "db"
