@@ -39,6 +39,14 @@ Parses times in free form like: "1s 500ms".
 
 When no configured sensor responds within the timeout delay a reconnection to the modbus server is issued.
 
+### The `[modbus_rtu]` section
+Ignored if the `[modbus]` is available.
+Uses a hardcoded baudrate of 19200bps and even parity with one stop bit.
+Pull requests to make this configurable are welcome.
+
+#### The `port` field
+The address of the serial device. On windows this is usually named `COMx`.
+
 ### The `[influxdb]` section
 
 #### The `hostname` field
@@ -50,6 +58,18 @@ To create a database manually you can use the `influx` tool with tha `create dat
 
 #### The `username` and `password` fields
 Optional fields to configure credentials when authentication is enabled for InfluxDB.
+
+### The `[influxdb2]` section
+Ignored if the `[influxdb]` is available.
+
+#### The `hostname` field
+URL of the InfluxDB http api endpoint.
+
+#### The `organization` field
+The organization in which to write data. Use your organization name or ID.
+
+#### The `bucket` fields
+The bucket in which to write data. Use the bucket name or ID. The bucket must belong to the specified organization.
 
 ### Sensor `[\<GROUP\>]` sections
 Every other top level section in the configuration file specifies a sensor group.

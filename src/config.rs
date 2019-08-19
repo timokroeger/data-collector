@@ -3,12 +3,12 @@ use std::fs;
 use std::time::Duration;
 
 use crate::sensor::RegisterMap;
-use modbus::tcp::Config as ModbusTcpConfig;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
 pub struct Config {
-    pub modbus: ModbusConfig,
+    pub modbus: Option<ModbusConfig>,
+    pub modbus_rtu: Option<ModbusRtuConfig>,
     pub influxdb: Option<InfluxDbConfig>,
     pub influxdb2: Option<InfluxDb2Config>,
 
@@ -31,16 +31,9 @@ pub struct ModbusConfig {
     pub timeout: Duration,
 }
 
-impl ModbusConfig {
-    pub fn to_modbus_tcp_config(&self) -> ModbusTcpConfig {
-        ModbusTcpConfig {
-            tcp_port: self.port,
-            tcp_connect_timeout: None,
-            tcp_read_timeout: Some(self.timeout),
-            tcp_write_timeout: Some(self.timeout),
-            modbus_uid: 0,
-        }
-    }
+#[derive(Deserialize)]
+pub struct ModbusRtuConfig {
+    pub port: String,
 }
 
 #[derive(Deserialize)]

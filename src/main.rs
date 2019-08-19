@@ -11,10 +11,11 @@ use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_v
 use config::*;
 use humantime;
 use log::{debug, error, info, warn};
-use modbus::{tcp::Transport, Client as ModbusClient, Error as ModbusError};
 use reqwest::{Client as HttpClient, RequestBuilder};
 use sensor::Sensor;
 use simplelog::{Config as LogConfig, TermLogger, WriteLogger};
+use tokio_modbus::{client::sync::Context, prelude::*};
+use tokio_serial::{DataBits, FlowControl, Parity, SerialPortSettings, StopBits};
 
 fn influxdb_line(
     measurement: &str,
@@ -65,7 +66,7 @@ fn get_influxdb_lines(sensor: &Sensor, register_values: &HashMap<u16, u16>) -> S
 }
 
 fn connection_task(
-    mut mb: impl ModbusClient,
+    mut mb: impl SyncReader,
     http_req: RequestBuilder,
     sensor_groups: &BTreeMap<String, SensorGroupConfig>,
 ) -> Result<(), Error> {
@@ -107,15 +108,7 @@ fn connection_task(
                 Ok(register_values) => {
                     lines.push_str(&get_influxdb_lines(&sensor, &register_values))
                 }
-                Err(e) => match e {
-                    ModbusError::Exception(_)
-                    | ModbusError::InvalidData(_)
-                    | ModbusError::InvalidFunction => {
-                        error!("ModbusTCP: Sensor {}: {}", sensor.id, e);
-                        panic!("Please check the connected sensors and the configuration.");
-                    }
-                    _ => warn!("ModbusTCP: Sensor {}: {}", sensor.id, e),
-                },
+                Err(e) => warn!("ModbusTCP: Sensor {}: {}", sensor.id, e),
             }
         }
 
@@ -190,8 +183,38 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
         config.sensor_groups.len()
     );
 
-    let modbus_hostname = &config.modbus.hostname;
-    let modbus_config = config.modbus.to_modbus_tcp_config();
+    let connect_fn: Box<dyn Fn() -> Result<Context, Error>> =
+        if let Some(mb_tcp_cfg) = config.modbus {
+            let modbus_hostname = format!("{}:{}", mb_tcp_cfg.hostname, mb_tcp_cfg.port);
+            let modbus_hostaddr = modbus_hostname.parse().unwrap();
+            // TODO: Use the timeout value from the configuration file.
+
+            Box::new(move || {
+                debug!("ModbusTCP: Connecting to {}", modbus_hostname);
+                sync::tcp::connect(modbus_hostaddr).map(|c| {
+                    info!("ModbusTCP: Successfully connected to {}", modbus_hostname);
+                    c
+                })
+            })
+        } else if let Some(mb_rtu_cfg) = config.modbus_rtu {
+            let serial_config = SerialPortSettings {
+                baud_rate: 19200,
+                data_bits: DataBits::Eight,
+                flow_control: FlowControl::None,
+                parity: Parity::Even,
+                stop_bits: StopBits::One,
+                timeout: Duration::from_millis(200),
+            };
+            Box::new(move || {
+                debug!("ModbusRTU: Connecting to {}", mb_rtu_cfg.port);
+                sync::rtu::connect(&mb_rtu_cfg.port, &serial_config).map(|c| {
+                    info!("ModbusRTU: Successfully connected to {}", mb_rtu_cfg.port);
+                    c
+                })
+            })
+        } else {
+            panic!("No modbus configuration found!");
+        };
 
     let client = HttpClient::new();
     let req = if let Some(influx) = config.influxdb {
@@ -214,10 +237,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
 
     // Retry to connect forever
     loop {
-        debug!("ModbusTCP: Connecting to {}", modbus_hostname);
-        let e = match Transport::new_with_cfg(modbus_hostname, modbus_config) {
+        let e = match connect_fn() {
             Ok(mb) => {
-                info!("ModbusTCP: Successfully connected to {}", modbus_hostname);
                 connection_task(mb, req.try_clone().unwrap(), &config.sensor_groups).unwrap_err()
             }
             Err(e) => e,
