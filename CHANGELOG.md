@@ -6,6 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## v0.6.1 - 2019-08-21
+- Update dependencies
+- Fix docker image
+
+## v0.6.0
+- ModbusRTU support
+- Switch to tokio_modbus library
+
+## v0.5.0
+- Support for InfluxDB 2.0 API
+
 ## v0.4.0
 - Revert back to v0.2 behaviour. Keep-alive checking was the wrong approach
 - Config code cleanup
