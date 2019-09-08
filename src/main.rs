@@ -4,6 +4,7 @@ mod sensor;
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{Error, ErrorKind};
+use std::net::ToSocketAddrs;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -186,7 +187,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     let connect_fn: Box<dyn Fn() -> Result<Context, Error>> =
         if let Some(mb_tcp_cfg) = config.modbus {
             let modbus_hostname = format!("{}:{}", mb_tcp_cfg.hostname, mb_tcp_cfg.port);
-            let modbus_hostaddr = modbus_hostname.parse().unwrap();
+            let modbus_hostaddr = modbus_hostname.to_socket_addrs().unwrap().next().unwrap();
             // TODO: Use the timeout value from the configuration file.
 
             Box::new(move || {

@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## v0.6.2 - 2019-09-08
+- Use ARMv7 alpine image for docker
+- Fix host name resolution
+
 ## v0.6.1 - 2019-08-21
 - Update dependencies
 - Fix docker image
