@@ -48,6 +48,18 @@ URL of the InfluxDB http api endpoint.
 Database name to store the data in. The database must exists for datapoints to be stored.
 To create a database manually you can use the `influx` tool with tha `create database <DB>' command.
 
+### The `[influxdb2]` section
+Ignored if the `[influxdb]` is available.
+
+#### The `hostname` field
+URL of the InfluxDB http api endpoint.
+
+#### The `organization` field
+The organization in which to write data. Use your organization name or ID.
+
+#### The `bucket` fields
+The bucket in which to write data. Use the bucket name or ID. The bucket must belong to the specified organization.
+
 #### The `username` and `password` fields
 Optional fields to configure credentials when authentication is enabled for InfluxDB.
 
