@@ -13,14 +13,14 @@ Configurable Modbus client which sends the collected data to InfluxDB.
         -V, --version    Prints version information
 
     OPTIONS:
-        -c, --config <FILE>       Sets a custom config file [default: datacollector.toml]
+        -c, --config <FILE>       Sets a custom config file [default: config.toml]
             --logfile <FILE>      Sets a custom log file
             --loglevel <LEVEL>    Sets the logging level [default: warn]
                                   [possible values: off, error, warn, info, debug, trace]
 
 ## Configuration
 
-By default configuration is loaded from `datacollector.toml` in the current directory.
+By default configuration is loaded from `config.toml` in the current directory.
 The configuration file can be overwritten with the `--config <FILE>` flag.
 An example configuration file is provided in this repository.
 
@@ -63,24 +63,36 @@ The bucket in which to write data. Use the bucket name or ID. The bucket must be
 #### The `username` and `password` fields
 Optional fields to configure credentials when authentication is enabled for InfluxDB.
 
-### Sensor `[\<GROUP\>]` sections
-Every other top level section in the configuration file specifies a sensor group.
-A sensor group shares the same set of registers. Usually a group for each sensor type is used.
+### The `[[devices]]` array
+Contains one entry for each modbus device on the bus.
 
-#### The `scan_interval` field
-Polling interval for all defined `measurement_registers`.
-Parses times in free form like: "1min 30s".
+#### The `template` field
+Optional. Name of the device template that should be used. All settings from the template are copied to this device.
 
-#### The `[\<GROUP\>.measurement_registers]` section
-Name to register address mappings.
-The name is used as the measurement key when storing data points in InfluxDB.
-This mapping is shared among all sensors in this group.
-
-#### The `[[\<GROUP\>.sensors]]` array
-Array of sensors in this group.
-
-##### The `id` field
+#### The `id` field
 Modbus Slave ID/Unit ID of the sensor.
 
-##### Other fields
-Optional string tags which are stored alogside each datapoint of this sensor.
+#### The `scan_interval` field
+Polling interval for all defined `input_registers`.
+Parses times in free form like: "1min 30s".
+
+#### The `tags` table
+Optional. Key value pairs that are stored in the database alongside each measurement from this device.
+
+#### The `[[input_registers]]` array
+
+##### The `addr` field
+Address of the register (starting at 0). Not to be confused with the Modbus data model number (which starts at 1).
+
+##### The `id` field
+Name for the register. Used as `measurement` in InfluxDB.
+
+##### The `data_type` field
+Optional, default: "u16".
+Data type of the register. Possible values: "u16", "u32", "u64", "i16", "i32", "i64", "f32", "f64"
+
+##### The `tags` table
+Optional. Key value pairs that are stored in the database alongside this measurement
+
+### The `[templates.<template_name>]` section
+See the descripition of the `[[devices]]` array.

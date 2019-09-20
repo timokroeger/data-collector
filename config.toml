@@ -1,0 +1,53 @@
+[modbus]
+hostname = "127.0.0.1"
+port = 502
+timeout = "1s"
+
+# [influxdb]
+# hostname = "http://localhost:8086"
+# database = "testdb"
+# username = "testuser"
+# password = "testpw"
+
+[influxdb2]
+hostname = "http://localhost:9999/api/v2"
+organization = "testorg"
+bucket = "testbucket"
+auth_token = "Ef_IVxTOA..."
+
+[templates.gdt20]
+scan_interval = "2s"
+tags.sensor = "WIKA GDT20"
+
+  [[templates.gdt20.input_registers]]
+  addr = 0
+  name = "pressure"
+  data_type = "f32"
+  tags.unit = "bar"
+  
+  [[templates.gdt20.input_registers]]
+  addr = 12
+  name = "temperature"
+  data_type = "f32"
+  tags.unit = "°C"
+  
+  [[templates.gdt20.input_registers]]
+  addr = 20
+  name = "gas_density"
+  data_type = "f32"
+  tags.unit = "kg/m^3"
+
+[[devices]]
+template = "gdt20"
+id = 1
+tags = { gas_compartment = "CB", phase = "L1" }
+
+[[devices]]
+template = "gdt20"
+id = 2
+tags = { gas_compartment = "CB", phase = "L2" }
+
+[[devices]]
+template = "gdt20"
+id = 3
+tags = { gas_compartment = "CB", phase = "L3" }
