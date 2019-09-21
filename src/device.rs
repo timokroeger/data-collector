@@ -56,11 +56,7 @@ pub struct Device {
     id: u8,
     scan_interval: Duration,
     tags: BTreeMap<String, String>,
-
-    // Addr as key
-    input_registers: BTreeMap<u16, Register>,
-
-    requests: Vec<Request>,
+    input_registers: Registers,
 }
 
 impl Device {
@@ -70,14 +66,43 @@ impl Device {
         tags: BTreeMap<String, String>,
         input_registers: BTreeMap<u16, Register>,
     ) -> Self {
-        let requests = requests_from_registers(&input_registers);
         Self {
             id,
             scan_interval,
             tags,
-            input_registers,
-            requests,
+            input_registers: Registers::new(input_registers),
         }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+struct Registers {
+    // Addr as key
+    map: BTreeMap<u16, Register>,
+    requests: Vec<Request>,
+}
+
+impl Registers {
+    fn new(map: BTreeMap<u16, Register>) -> Self {
+        let mut requests: Vec<Request> = Vec::new();
+
+        // Registers are sorted by address
+        for reg in &map {
+            let curr = Request::new(*reg.0, reg.1.data_type.num_registers());
+            match requests.last_mut() {
+                // Append consecutive registers to the current request
+                Some(ref mut prev) if curr.start <= prev.end => {
+                    if curr.end > prev.end {
+                        prev.end = curr.end;
+                    }
+                }
+
+                // Create a new request for all others
+                _ => requests.push(curr),
+            }
+        }
+
+        Self { map, requests }
     }
 }
 
@@ -100,34 +125,12 @@ impl Request {
     }
 }
 
-fn requests_from_registers(registers: &BTreeMap<u16, Register>) -> Vec<Request> {
-    let mut requests: Vec<Request> = Vec::new();
-
-    // Registers are sorted by address
-    for reg in registers {
-        let curr = Request::new(*reg.0, reg.1.data_type.num_registers());
-        match requests.last_mut() {
-            // Append consecutive registers to the current request
-            Some(ref mut prev) if curr.start <= prev.end => {
-                if curr.end > prev.end {
-                    prev.end = curr.end;
-                }
-            }
-
-            // Create a new request for all others
-            _ => requests.push(curr),
-        }
-    }
-
-    requests
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_requests_from_registers_consecutive() {
+    fn test_registers_consecutive() {
         let mut registers = BTreeMap::new();
         registers.insert(
             1,
@@ -149,7 +152,7 @@ mod tests {
         );
 
         let requests = vec![Request::new(1, 3)];
-        assert_eq!(requests, requests_from_registers(&registers));
+        assert_eq!(requests, Registers::new(registers).requests);
     }
 
     #[test]
@@ -175,7 +178,7 @@ mod tests {
         );
 
         let requests = vec![Request::new(1, 2), Request::new(8, 1)];
-        assert_eq!(requests, requests_from_registers(&registers));
+        assert_eq!(requests, Registers::new(registers).requests);
     }
 
     #[test]
@@ -201,6 +204,6 @@ mod tests {
         );
 
         let requests = vec![Request::new(1, 4)];
-        assert_eq!(requests, requests_from_registers(&registers));
+        assert_eq!(requests, Registers::new(registers).requests);
     }
 }
