@@ -2,14 +2,14 @@ use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::time::Duration;
 
-#[derive(Debug, PartialEq)]
+use modbus::{Client, Error};
+
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum DataType {
     U16,
     U32,
-    U64,
     I16,
     I32,
-    I64,
     F32,
     F64,
 }
@@ -21,10 +21,8 @@ impl FromStr for DataType {
         match s {
             "u16" => Ok(Self::U16),
             "u32" => Ok(Self::U32),
-            "u64" => Ok(Self::U64),
             "i16" => Ok(Self::I16),
             "i32" => Ok(Self::I32),
-            "i64" => Ok(Self::I64),
             "f32" => Ok(Self::F32),
             "f64" => Ok(Self::F64),
             _ => Err(()),
@@ -33,22 +31,29 @@ impl FromStr for DataType {
 }
 
 impl DataType {
-    fn num_registers(&self) -> u16 {
+    fn num_registers(self) -> u16 {
         match self {
             Self::U16 | Self::I16 => 1,
             Self::U32 | Self::I32 | Self::F32 => 2,
-            Self::U64 | Self::I64 | Self::F64 => 4,
+            Self::F64 => 4,
         }
     }
-}
 
-#[derive(Debug, PartialEq)]
-pub struct Register {
-    pub data_type: DataType,
-    pub scaling: f64,
-
-    pub name: String,
-    pub tags: BTreeMap<String, String>,
+    pub fn parse_data(self, data: &[u16]) -> f64 {
+        match self {
+            Self::U16 => f64::from(data[0]),
+            Self::U32 => f64::from((data[0] as u32) << 16 | data[1] as u32),
+            Self::I16 => f64::from(data[0] as i16),
+            Self::I32 => f64::from((data[0] as i32) << 16 | data[1] as i32),
+            Self::F32 => f64::from(f32::from_bits((data[0] as u32) << 16 | data[1] as u32)),
+            Self::F64 => f64::from_bits(
+                (data[0] as u64) << 48
+                    | (data[1] as u64) << 32
+                    | (data[2] as u64) << 16
+                    | data[3] as u64,
+            ),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -72,6 +77,28 @@ impl Device {
             tags,
             input_registers: Registers::new(input_registers),
         }
+    }
+
+    pub fn read(&self, mb: &mut impl Client) -> Result<(), Error> {
+        let register_map = &self.input_registers.map;
+        for req in &self.input_registers.requests {
+            mb.set_uid(self.id);
+            let resp = mb.read_input_registers(req.start, req.len())?;
+
+            for (addr, reg) in register_map.range(req.start..req.end) {
+                let start_idx = (addr - req.start) as usize;
+                let data = &resp[start_idx..];
+
+                // TODO: Store and return parsed values
+                println!(
+                    "{} = {}",
+                    reg.name,
+                    reg.data_type.parse_data(data) * reg.scaling
+                );
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -104,6 +131,15 @@ impl Registers {
 
         Self { map, requests }
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Register {
+    pub data_type: DataType,
+    pub scaling: f64,
+
+    pub name: String,
+    pub tags: BTreeMap<String, String>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -189,7 +225,7 @@ mod tests {
             Register {
                 name: String::from("foobar"),
                 tags: BTreeMap::new(),
-                data_type: DataType::U64,
+                data_type: DataType::F64,
                 scaling: 8.7,
             },
         );
@@ -205,5 +241,22 @@ mod tests {
 
         let requests = vec![Request::new(1, 4)];
         assert_eq!(requests, Registers::new(registers).requests);
+    }
+
+    #[test]
+    fn test_register_parse_data() {
+        let data: [u16; 4] = [0x2468, 0xACF0, 0x0002, 0x0004];
+
+        let dt = DataType::U16;
+        assert_eq!(dt.parse_data(&data[..]), 0x2468u16 as f64);
+
+        let dt = DataType::U32;
+        assert_eq!(dt.parse_data(&data[..]), 0x2468ACF0u32 as f64);
+
+        let dt = DataType::I16;
+        assert_eq!(dt.parse_data(&data[..]), 0x2468i16 as f64);
+
+        let dt = DataType::I32;
+        assert_eq!(dt.parse_data(&data[..]), 0x2468ACF0i32 as f64);
     }
 }

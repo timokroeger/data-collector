@@ -14,7 +14,6 @@ use humantime;
 use log::{debug, error, info, warn};
 use modbus::{tcp::Transport, Client as ModbusClient, Error as ModbusError};
 use reqwest::{Client as HttpClient, RequestBuilder};
-use sensor::Sensor;
 use simplelog::{Config as LogConfig, TermLogger, WriteLogger};
 
 fn influxdb_line(measurement: &str, tags: &[(&str, &str)], value: u16, timestamp: u64) -> String {

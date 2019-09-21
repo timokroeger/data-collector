@@ -89,7 +89,7 @@ Name for the register. Used as `measurement` in InfluxDB.
 
 ##### The `data_type` field
 Optional, default: "u16".
-Data type of the register. Possible values: "u16", "u32", "u64", "i16", "i32", "i64", "f32", "f64"
+Data type of the register. Possible values: "u16", "u32", "i16", "i32", "f32", "f64"
 
 ##### The `tags` table
 Optional. Key value pairs that are stored in the database alongside this measurement
