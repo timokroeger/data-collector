@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 - -
 
+## v0.7.0
+- Rewrite almost complete codebase
+- New configuration format
+- Support a different `scan_interval` for each device
+
 ## v0.5.1 - 2019-09-11
 - Update dependencies
 - Build docker image for arm32v7 target (compatible with rpi)

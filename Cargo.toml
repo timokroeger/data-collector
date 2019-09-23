@@ -1,6 +1,6 @@
 [package]
 name = "data-collector"
-version = "0.5.1"
+version = "0.7.0"
 authors = ["Timo Kröger <timokroeger93@gmail.com>"]
 description = "Configurable Modbus client which sends the collected data to InfluxDB"
 edition = "2018"
