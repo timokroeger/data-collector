@@ -111,7 +111,7 @@ fn device_from_config(
                 RegisterConfig::Simple(addr) => (
                     addr,
                     Register {
-                        name: String::from("input_register"),
+                        name: format!("input_register_{}", addr),
                         data_type: DataType::U16,
                         scaling: 1.0,
                         tags: BTreeMap::new(),
@@ -196,7 +196,7 @@ mod tests {
         registers.insert(
             1,
             Register {
-                name: String::from("input_register"),
+                name: String::from("input_register_1"),
                 tags: BTreeMap::new(),
                 data_type: DataType::U16,
                 scaling: 1.0,
@@ -205,7 +205,7 @@ mod tests {
         registers.insert(
             1234,
             Register {
-                name: String::from("input_register"),
+                name: String::from("input_register_1234"),
                 tags: BTreeMap::new(),
                 data_type: DataType::U16,
                 scaling: 1.0,
