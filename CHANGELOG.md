@@ -5,6 +5,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- -
+
+## v0.5.1 - 2019-09-11
+- Update dependencies
+- Build docker image for arm32v7 target (compatible with rpi)
+- Add InfluxDB configuration documentation
+
+## v0.5.0
+- Support for InfluxDB 2.0 API
 
 ## v0.6.2 - 2019-09-08
 - Use ARMv7 alpine image for docker
