@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
+use std::iter;
 use std::str::FromStr;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use modbus::{Client, Error};
 
@@ -83,27 +84,56 @@ impl Device {
         self.scan_interval
     }
 
-    pub fn read(&self, mb: &mut impl Client) -> Result<(), Error> {
+    pub fn read(&self, mb: &mut impl Client) -> Result<String, Error> {
+        let mut influx_lines = String::new();
+
         let register_map = &self.input_registers.map;
         for req in &self.input_registers.requests {
             mb.set_uid(self.id);
             let resp = mb.read_input_registers(req.start, req.len())?;
 
+            let id_string = self.id.to_string();
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+
+            // Round to interval granularity
+            let interval = self.scan_interval.as_nanos();
+            let timestamp = (timestamp / interval) * interval;
+
             for (addr, reg) in register_map.range(req.start..req.end) {
                 let start_idx = (addr - req.start) as usize;
                 let data = &resp[start_idx..];
 
-                // TODO: Store and return parsed values
-                println!(
-                    "{} = {}",
-                    reg.name,
-                    reg.data_type.parse_data(data) * reg.scaling
-                );
+                let value = reg.data_type.parse_data(data) * reg.scaling;
+                let tag_iter = self
+                    .tags
+                    .iter()
+                    .chain(&reg.tags)
+                    .map(|(k, v)| (k.as_str(), v.as_str()))
+                    .chain(iter::once(("modbus_id", id_string.as_str())));
+                influx_lines.push_str(&influxdb_line(&reg.name, tag_iter, value, timestamp));
             }
         }
 
-        Ok(())
+        Ok(influx_lines)
     }
+}
+
+fn influxdb_line<'a, I>(measurement: &str, tags: I, value: f64, timestamp: u128) -> String
+where
+    I: Iterator<Item = (&'a str, &'a str)>,
+{
+    let escape_meas = |s: &str| s.replace(',', "\\,").replace(' ', "\\ ");
+    let escape_tag = |s: &str| escape_meas(s).replace('=', "\\=");
+
+    let mut line = escape_meas(measurement);
+    for (k, v) in tags {
+        line.push_str(&format!(",{}={}", escape_tag(k), escape_tag(v)));
+    }
+    line.push_str(&format!(" value={} {}\n", value, timestamp));
+    line
 }
 
 #[derive(Debug, PartialEq)]

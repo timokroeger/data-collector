@@ -7,22 +7,10 @@ use std::thread;
 
 use crate::config::Config;
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
-use log::{debug, info};
-use modbus::{tcp::Transport};
-use reqwest::{Client as HttpClient};
+use log::{debug, info, warn};
+use modbus::tcp::Transport;
+use reqwest::Client as HttpClient;
 use simplelog::{Config as LogConfig, TermLogger, WriteLogger};
-
-fn influxdb_line(measurement: &str, tags: &[(&str, &str)], value: u16, timestamp: u64) -> String {
-    let escape_meas = |s: &str| s.replace(',', "\\,").replace(' ', "\\ ");
-    let escape_tag = |s: &str| escape_meas(s).replace('=', "\\=");
-
-    let mut line = escape_meas(measurement);
-    for (k, v) in tags {
-        line.push_str(&format!(",{}={}", escape_tag(k), escape_tag(v)));
-    }
-    line.push_str(&format!(" value={} {}\n", value, timestamp));
-    line
-}
 
 fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     // Parse command line arguments
@@ -90,7 +78,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     } else {
         panic!("No influxdb configuration found!");
     };
-    let req = req.query(&[("precision", "s")]);
 
     let devices = config.devices.into_devices();
 
@@ -103,8 +90,18 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     let mut threads = Vec::new();
     for dev in devices {
         let mb = mb.clone();
+        let req = req.try_clone().unwrap();
         threads.push(thread::spawn(move || loop {
-            dev.read(&mut *mb.lock().unwrap()).unwrap();
+            let lines = dev.read(&mut *mb.lock().unwrap()).unwrap();
+            let resp = req.try_clone().unwrap().body(lines).send();
+            match resp {
+                Ok(resp) => {
+                    if !resp.status().is_success() {
+                        warn!("InfluxDB: {:?}", resp);
+                    }
+                }
+                Err(e) => warn!("InfluxDB: {}", e),
+            }
             thread::sleep(dev.get_scan_interval());
         }));
     }
