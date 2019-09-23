@@ -1,19 +1,15 @@
 mod config;
 mod device;
 
-use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
-use std::io::{Error, ErrorKind};
+use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::config::Config;
-use crate::device::Device;
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
-use humantime;
-use log::{debug, error, info, warn};
-use modbus::{tcp::Transport, Client as ModbusClient, Error as ModbusError};
-use reqwest::{Client as HttpClient, RequestBuilder};
+use log::{debug, info};
+use modbus::{tcp::Transport};
+use reqwest::{Client as HttpClient};
 use simplelog::{Config as LogConfig, TermLogger, WriteLogger};
 
 fn influxdb_line(measurement: &str, tags: &[(&str, &str)], value: u16, timestamp: u64) -> String {
@@ -98,26 +94,25 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
 
     let devices = config.devices.into_devices();
 
-    // Retry to connect forever
-    loop {
-        debug!("ModbusTCP: Connecting to {}", modbus_hostname);
-        let e = match Transport::new_with_cfg(&modbus_hostname, modbus_config) {
-            Ok(mb) => {
-                info!("ModbusTCP: Successfully connected to {}", modbus_hostname);
-                // TODO: Spawn task for each device
-                thread::sleep(Duration::from_secs(60));
-                Error::last_os_error()
-            }
-            Err(e) => e,
-        };
+    debug!("ModbusTCP: Connecting to {}", modbus_hostname);
+    let mb = Transport::new_with_cfg(&modbus_hostname, modbus_config).unwrap();
 
-        // TODO: Exponential backoff
-        let delay = Duration::from_secs(10);
-        error!(
-            "ModbusTCP: {}, reconnecting in {}...",
-            e,
-            humantime::format_duration(delay)
-        );
-        thread::sleep(delay);
+    // Wrapper for thread safe access of the Modbus connection.
+    let mb = Arc::new(Mutex::new(mb));
+
+    let mut threads = Vec::new();
+    for dev in devices {
+        let mb = mb.clone();
+        threads.push(thread::spawn(move || loop {
+            dev.read(&mut *mb.lock().unwrap()).unwrap();
+            thread::sleep(dev.get_scan_interval());
+        }));
     }
+
+    // Wait for all sensors to fail before exiting.
+    for thread in threads {
+        thread.join().unwrap();
+    }
+
+    Ok(())
 }

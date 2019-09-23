@@ -79,6 +79,10 @@ impl Device {
         }
     }
 
+    pub fn get_scan_interval(&self) -> Duration {
+        self.scan_interval
+    }
+
     pub fn read(&self, mb: &mut impl Client) -> Result<(), Error> {
         let register_map = &self.input_registers.map;
         for req in &self.input_registers.requests {
