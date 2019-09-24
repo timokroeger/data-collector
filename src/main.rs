@@ -62,21 +62,30 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     let (modbus_hostname, modbus_config) = modbus_config.into_modbus_tcp_config();
 
     let client = HttpClient::new();
-    let req = if let Some(influx) = config.influxdb {
-        let req = client
-            .post(&format!("{}/write", influx.hostname))
-            .query(&[("db", influx.database)]);
-        match (influx.username, influx.password) {
-            (Some(username), Some(password)) => req.query(&[("u", username), ("p", password)]),
-            (_, _) => req,
+    let req = match config.influxdb {
+        InfluxDbConfig::V1 {
+            hostname,
+            database,
+            username,
+            password,
+        } => {
+            let req = client
+                .post(&format!("{}/write", hostname))
+                .query(&[("db", database)]);
+            match (username, password) {
+                (Some(u), Some(p)) => req.query(&[("u", u), ("p", p)]),
+                (_, _) => req,
+            }
         }
-    } else if let Some(influx2) = config.influxdb2 {
-        client
-            .post(&format!("{}/write", influx2.hostname))
-            .query(&[("org", influx2.organization), ("bucket", influx2.bucket)])
-            .header("Authorization", format!("Token {}", influx2.auth_token))
-    } else {
-        panic!("No influxdb configuration found!");
+        InfluxDbConfig::V2 {
+            hostname,
+            organization,
+            bucket,
+            auth_token,
+        } => client
+            .post(&format!("{}/write", hostname))
+            .query(&[("org", organization), ("bucket", bucket)])
+            .header("Authorization", format!("Token {}", auth_token)),
     };
 
     let devices = config.devices.into_devices();

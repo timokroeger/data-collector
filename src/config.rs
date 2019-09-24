@@ -9,8 +9,9 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 pub struct Config {
     pub modbus: ModbusConfig,
-    pub influxdb: Option<InfluxDbConfig>,
-    pub influxdb2: Option<InfluxDb2Config>,
+
+    #[serde(flatten)]
+    pub influxdb: InfluxDbConfig,
 
     #[serde(flatten)]
     pub devices: DevicesConfig,
@@ -47,19 +48,21 @@ impl ModbusConfig {
 }
 
 #[derive(Deserialize)]
-pub struct InfluxDbConfig {
-    pub hostname: String,
-    pub database: String,
-    pub username: Option<String>,
-    pub password: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub struct InfluxDb2Config {
-    pub hostname: String,
-    pub organization: String,
-    pub bucket: String,
-    pub auth_token: String,
+pub enum InfluxDbConfig {
+    #[serde(rename = "influxdb")]
+    V1 {
+        hostname: String,
+        database: String,
+        username: Option<String>,
+        password: Option<String>,
+    },
+    #[serde(rename = "influxdb2")]
+    V2 {
+        hostname: String,
+        organization: String,
+        bucket: String,
+        auth_token: String,
+    },
 }
 
 #[derive(Deserialize)]
