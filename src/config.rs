@@ -3,6 +3,7 @@ use std::fs;
 
 use crate::device::{DataType, Device, Register};
 use humantime;
+use isahc::http::{Request, Result as HttpResult};
 use modbus::tcp::Config as ModbusTcpConfig;
 use serde::Deserialize;
 
@@ -63,6 +64,41 @@ pub enum InfluxDbConfig {
         bucket: String,
         auth_token: String,
     },
+}
+
+impl InfluxDbConfig {
+    pub fn to_request<T>(&self, lines: T) -> HttpResult<Request<T>> {
+        let mut req = Request::builder();
+
+        match self {
+            InfluxDbConfig::V1 {
+                hostname,
+                database,
+                username,
+                password,
+            } => {
+                let mut uri = format!("{}/write?db={}", hostname, database);
+                if let (Some(u), Some(p)) = (username, password) {
+                    uri.push_str(&format!("&u={}&p={}", u, p));
+                }
+                req.uri(uri);
+            }
+            InfluxDbConfig::V2 {
+                hostname,
+                organization,
+                bucket,
+                auth_token,
+            } => {
+                req.uri(format!(
+                    "{}/write?org={}&bucket={}",
+                    hostname, organization, bucket
+                ));
+                req.header("Authorization", format!("Token {}", auth_token));
+            }
+        };
+
+        req.method("POST").body(lines)
+    }
 }
 
 #[derive(Deserialize)]

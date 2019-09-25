@@ -7,9 +7,9 @@ use std::thread;
 
 use crate::config::Config;
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
+use isahc;
 use log::{debug, info, warn};
 use modbus::tcp::Transport;
-use reqwest::Client as HttpClient;
 use simplelog::{Config as LogConfig, TermLogger, WriteLogger};
 
 fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
@@ -61,32 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     let modbus_config = config.modbus;
     let (modbus_hostname, modbus_config) = modbus_config.into_modbus_tcp_config();
 
-    let client = HttpClient::new();
-    let req = match config.influxdb {
-        InfluxDbConfig::V1 {
-            hostname,
-            database,
-            username,
-            password,
-        } => {
-            let req = client
-                .post(&format!("{}/write", hostname))
-                .query(&[("db", database)]);
-            match (username, password) {
-                (Some(u), Some(p)) => req.query(&[("u", u), ("p", p)]),
-                (_, _) => req,
-            }
-        }
-        InfluxDbConfig::V2 {
-            hostname,
-            organization,
-            bucket,
-            auth_token,
-        } => client
-            .post(&format!("{}/write", hostname))
-            .query(&[("org", organization), ("bucket", bucket)])
-            .header("Authorization", format!("Token {}", auth_token)),
-    };
+    let influxdb_config = Arc::new(config.influxdb);
 
     let devices = config.devices.into_devices();
 
@@ -99,10 +74,13 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     let mut threads = Vec::new();
     for dev in devices {
         let mb = mb.clone();
-        let req = req.try_clone().unwrap();
+        let influxdb_config = influxdb_config.clone();
         threads.push(thread::spawn(move || loop {
             let lines = dev.read(&mut *mb.lock().unwrap()).unwrap();
-            let resp = req.try_clone().unwrap().body(lines).send();
+            let req = influxdb_config
+                .to_request(lines)
+                .expect("Failed to create InfluxDB http request");
+            let resp = isahc::send(req);
             match resp {
                 Ok(resp) => {
                     if !resp.status().is_success() {
