@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::fs;
 
 use crate::device::{DataType, Device, Register};
 use humantime;
@@ -16,13 +15,6 @@ pub struct Config {
 
     #[serde(flatten)]
     pub devices: DevicesConfig,
-}
-
-impl Config {
-    pub fn new(filename: &str) -> Self {
-        let config_str = fs::read_to_string(filename).unwrap();
-        toml::from_str(&config_str).unwrap()
-    }
 }
 
 #[derive(Deserialize)]

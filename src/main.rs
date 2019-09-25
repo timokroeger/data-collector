@@ -1,7 +1,7 @@
 mod config;
 mod device;
 
-use std::fs::File;
+use std::fs::{self, File};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -55,8 +55,10 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     }
 
     let config_file = matches.value_of("config").unwrap();
-    let config = Config::new(&config_file);
-    info!("Configuration file: {}", config_file);
+    info!("Reading configuration file: {}", &config_file);
+
+    let config_str = fs::read_to_string(config_file)?;
+    let config: Config = toml::from_str(&config_str)?;
 
     let modbus_config = config.modbus;
     let (modbus_hostname, modbus_config) = modbus_config.into_modbus_tcp_config();
