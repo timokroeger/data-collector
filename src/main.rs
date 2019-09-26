@@ -3,11 +3,12 @@ mod device;
 
 use std::cmp;
 use std::fs::{self, File};
-use std::sync::{mpsc, Arc, Condvar, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
 use crate::config::{Config, InfluxDbConfig};
 use crate::device::Device;
+use bus::Bus;
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
 use isahc;
 use log::{debug, info, warn};
@@ -87,7 +88,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     let fail_count_threshold = devices.len() as isize * 2;
     let (fail_count_tx, fail_count_rx) = mpsc::channel::<isize>();
 
-    let running = Arc::new((Mutex::new(true), Condvar::new()));
+    let mut stop_notification = Bus::new(1);
 
     // Use one thread per device
     let mut threads = Vec::new();
@@ -96,7 +97,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
         let mb = mb.clone();
         let influxdb_config = influxdb_config.clone();
         let fail_count_tx = fail_count_tx.clone();
-        let running = running.clone();
+        let mut stop_notification = stop_notification.add_rx();
         threads.push(thread::spawn(move || loop {
             match read_device(&dev, &mut *mb.lock().unwrap(), &influxdb_config) {
                 Ok(_) => fail_count_tx.send(-1).unwrap(),
@@ -106,11 +107,10 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
                 }
             }
 
-            // Block until scan interval or stop thread when receiving a notification.
-            let &(ref lock, ref cvar) = &*running;
-            let running = lock.lock().unwrap();
-            let (running, _) = cvar.wait_timeout(running, dev.get_scan_interval()).unwrap();
-            if !*running {
+            if stop_notification
+                .recv_timeout(dev.get_scan_interval())
+                .is_ok()
+            {
                 break;
             }
         }));
@@ -122,13 +122,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
         debug!("fail_count={}", fail_count);
     }
 
-    // Stop all threads with a notification
-    let &(ref lock, ref cvar) = &*running;
-    {
-        let mut running = lock.lock().unwrap();
-        *running = false;
-    }
-    cvar.notify_one();
+    stop_notification.broadcast(());
 
     // Wait for all devices to fail before exiting.
     for thread in threads {
