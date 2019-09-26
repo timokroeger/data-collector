@@ -3,13 +3,13 @@ mod device;
 
 use std::cmp;
 use std::fs::{self, File};
-use std::sync::{mpsc, Arc, Mutex};
-use std::thread;
+use std::sync::{mpsc, Mutex};
 
 use crate::config::{Config, InfluxDbConfig};
 use crate::device::Device;
 use bus::Bus;
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
+use crossbeam_utils::thread as crossbeam_thread;
 use isahc;
 use log::{debug, info, warn};
 use modbus::{tcp::Transport, Error as ModbusError};
@@ -66,18 +66,17 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     let config_str = fs::read_to_string(config_file)?;
     let config: Config = toml::from_str(&config_str)?;
 
+    let devices = config.devices.into_devices();
+
     // Connect Modbus
     let modbus_config = config.modbus;
     let (modbus_hostname, modbus_config) = modbus_config.into_modbus_tcp_config();
 
     debug!("Connecting to {}", modbus_hostname);
     let mb = Transport::new_with_cfg(&modbus_hostname, modbus_config)?;
+    let mb = &Mutex::new(mb);
 
-    let devices = config.devices.into_devices();
-
-    // Wrappers for thread safe access of shared data
-    let mb = Arc::new(Mutex::new(mb));
-    let influxdb_config = Arc::new(config.influxdb);
+    let influxdb_config = &config.influxdb;
 
     // Share one failure counter for all devices.
     // With each failed device communication the counter is increased.
@@ -90,44 +89,39 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
 
     let mut stop_notification = Bus::new(1);
 
-    // Use one thread per device
-    let mut threads = Vec::new();
-
-    for dev in devices {
-        let mb = mb.clone();
-        let influxdb_config = influxdb_config.clone();
-        let fail_count_tx = fail_count_tx.clone();
-        let mut stop_notification = stop_notification.add_rx();
-        threads.push(thread::spawn(move || loop {
-            match read_device(&dev, &mut *mb.lock().unwrap(), &influxdb_config) {
-                Ok(_) => fail_count_tx.send(-1).unwrap(),
-                Err(e) => {
-                    warn!("ModbusTCP: {}", e);
-                    fail_count_tx.send(1).unwrap();
+    crossbeam_thread::scope(|s| {
+        for dev in devices {
+            let fail_count_tx = fail_count_tx.clone();
+            let mut stop_notification = stop_notification.add_rx();
+            s.spawn(move |_| loop {
+                match read_device(&dev, &mut *mb.lock().unwrap(), influxdb_config) {
+                    Ok(_) => fail_count_tx.clone().send(-1).unwrap(),
+                    Err(e) => {
+                        warn!("ModbusTCP: {}", e);
+                        fail_count_tx.send(1).unwrap();
+                    }
                 }
-            }
 
-            if stop_notification
-                .recv_timeout(dev.get_scan_interval())
-                .is_ok()
-            {
-                break;
-            }
-        }));
-    }
+                // During normal operation the timeout is used as delay.
+                // A stop notficiation breaks out of the loop and exits the thread.
+                if stop_notification
+                    .recv_timeout(dev.get_scan_interval())
+                    .is_ok()
+                {
+                    break;
+                }
+            });
+        }
 
-    // Wait for fail counter threshold to be reached
-    while fail_count < fail_count_threshold {
-        fail_count = cmp::max(0, fail_count + fail_count_rx.recv().unwrap());
-        debug!("fail_count={}", fail_count);
-    }
+        // Wait for fail counter threshold to be reached
+        while fail_count < fail_count_threshold {
+            fail_count = cmp::max(0, fail_count + fail_count_rx.recv().unwrap());
+            debug!("fail_count={}", fail_count);
+        }
 
-    stop_notification.broadcast(());
-
-    // Wait for all devices to fail before exiting.
-    for thread in threads {
-        thread.join().unwrap();
-    }
+        stop_notification.broadcast(());
+    })
+    .unwrap();
 
     Ok(())
 }

@@ -9,6 +9,7 @@ publish = false
 [dependencies]
 bus = "2.2.2"
 clap = "2"
+crossbeam-utils = "0.6.6"
 humantime = "1.2"
 isahc = "0.7"
 log = "0.4"
