@@ -1,8 +1,9 @@
 mod config;
 mod device;
 
+use std::cmp;
 use std::fs::{self, File};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::thread;
 
 use crate::config::{Config, InfluxDbConfig};
@@ -71,20 +72,63 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     debug!("Connecting to {}", modbus_hostname);
     let mb = Transport::new_with_cfg(&modbus_hostname, modbus_config)?;
 
+    let devices = config.devices.into_devices();
+
     // Wrappers for thread safe access of shared data
     let mb = Arc::new(Mutex::new(mb));
     let influxdb_config = Arc::new(config.influxdb);
 
+    // Share one failure counter for all devices.
+    // With each failed device communication the counter is increased.
+    // With each successfull device communicationt the counter is decreased.
+    // When the counter reaches the threshold (e.g. all devices on the bus failed
+    // two times in a row) action is taken.
+    let mut fail_count = 0isize;
+    let fail_count_threshold = devices.len() as isize * 2;
+    let (fail_count_tx, fail_count_rx) = mpsc::channel::<isize>();
+
+    let running = Arc::new((Mutex::new(true), Condvar::new()));
+
     // Use one thread per device
     let mut threads = Vec::new();
-    for dev in config.devices.into_devices() {
+
+    for dev in devices {
         let mb = mb.clone();
         let influxdb_config = influxdb_config.clone();
+        let fail_count_tx = fail_count_tx.clone();
+        let running = running.clone();
         threads.push(thread::spawn(move || loop {
-            read_device(&dev, &mut *mb.lock().unwrap(), &influxdb_config);
-            thread::sleep(dev.get_scan_interval());
+            match read_device(&dev, &mut *mb.lock().unwrap(), &influxdb_config) {
+                Ok(_) => fail_count_tx.send(-1).unwrap(),
+                Err(e) => {
+                    warn!("ModbusTCP: {}", e);
+                    fail_count_tx.send(1).unwrap();
+                }
+            }
+
+            // Block until scan interval or stop thread when receiving a notification.
+            let &(ref lock, ref cvar) = &*running;
+            let running = lock.lock().unwrap();
+            let (running, _) = cvar.wait_timeout(running, dev.get_scan_interval()).unwrap();
+            if !*running {
+                break;
+            }
         }));
     }
+
+    // Wait for fail counter threshold to be reached
+    while fail_count < fail_count_threshold {
+        fail_count = cmp::max(0, fail_count + fail_count_rx.recv().unwrap());
+        debug!("fail_count={}", fail_count);
+    }
+
+    // Stop all threads with a notification
+    let &(ref lock, ref cvar) = &*running;
+    {
+        let mut running = lock.lock().unwrap();
+        *running = false;
+    }
+    cvar.notify_one();
 
     // Wait for all devices to fail before exiting.
     for thread in threads {
