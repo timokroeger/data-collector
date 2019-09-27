@@ -8,12 +8,13 @@ use std::sync::{mpsc, Mutex};
 use crate::config::{Config, InfluxDbConfig};
 use crate::device::Device;
 use bus::Bus;
+use chrono::Local;
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
 use crossbeam_utils::thread as crossbeam_thread;
 use isahc;
 use log::{debug, info, warn, error};
 use modbus::{tcp::Transport, Error as ModbusError};
-use simplelog::{Config as LogConfig, TermLogger, WriteLogger};
+use simplelog::{Config as LogConfig, TermLogger, TerminalMode, WriteLogger};
 
 fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     // Parse command line arguments
@@ -47,7 +48,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
 
     // Setup logging
     let log_config = LogConfig {
-        time_format: Some("%+"),
+        time_format: Some("%Y-%m-%dT%H:%M:%S%.3f%:z"), // RFC3339 format
+        offset: Local::today().offset().clone(),
         ..LogConfig::default()
     };
     let log_level = matches.value_of("loglevel").unwrap().parse()?;
@@ -56,7 +58,9 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
             let log_file = File::create(logfile)?;
             WriteLogger::init(log_level, log_config, log_file)?
         }
-        None => TermLogger::init(log_level, log_config)?,
+        None => {
+            let _ = TermLogger::init(log_level, log_config, TerminalMode::Mixed);
+        }
     }
 
     // Read configuration file
