@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 - -
 
-## v0.7.0
+## v0.8.0 - 2019-09-27
+- Improved logging (local time and padding for log level)
+- Better error handling
+- Replace HTTP library
+
+## v0.7.0 - 2019-09-23
 - Rewrite almost complete codebase
 - New configuration format
 - Support a different `scan_interval` for each device
