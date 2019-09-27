@@ -1,7 +1,7 @@
 mod config;
 mod device;
 
-use std::cmp;
+use std::convert::TryFrom;
 use std::fs::{self, File};
 use std::sync::{mpsc, Mutex};
 
@@ -11,7 +11,7 @@ use bus::Bus;
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
 use crossbeam_utils::thread as crossbeam_thread;
 use isahc;
-use log::{debug, info, warn};
+use log::{debug, info, warn, error};
 use modbus::{tcp::Transport, Error as ModbusError};
 use simplelog::{Config as LogConfig, TermLogger, WriteLogger};
 
@@ -83,29 +83,38 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     // With each successfull device communicationt the counter is decreased.
     // When the counter reaches the threshold (e.g. all devices on the bus failed
     // two times in a row) action is taken.
-    let mut fail_count = 0isize;
-    let fail_count_threshold = devices.len() as isize * 2;
-    let (fail_count_tx, fail_count_rx) = mpsc::channel::<isize>();
+    let mut fail_count = 0;
+    let scan_interval_iter = devices.iter().map(|d| d.scan_interval.as_nanos());
+    let fail_count_threshold = 2
+        * devices.len()
+        * usize::try_from(
+            scan_interval_iter.clone().max().unwrap() / scan_interval_iter.clone().min().unwrap(),
+        )
+        .unwrap();
+    let (fail_tx, fail_rx) = mpsc::channel::<bool>();
 
     let mut stop_notification = Bus::new(1);
 
     crossbeam_thread::scope(|s| {
         for dev in devices {
-            let fail_count_tx = fail_count_tx.clone();
+            let fail_tx = fail_tx.clone();
             let mut stop_notification = stop_notification.add_rx();
             s.spawn(move |_| loop {
                 match read_device(&dev, &mut *mb.lock().unwrap(), influxdb_config) {
-                    Ok(_) => fail_count_tx.clone().send(-1).unwrap(),
+                    Ok(_) => {
+                        debug!("ModbusTCP: Device {} read successfully", dev.id);
+                        fail_tx.send(false).unwrap();
+                    }
                     Err(e) => {
                         warn!("ModbusTCP: {}", e);
-                        fail_count_tx.send(1).unwrap();
+                        fail_tx.send(true).unwrap();
                     }
                 }
 
                 // During normal operation the timeout is used as delay.
                 // A stop notficiation breaks out of the loop and exits the thread.
                 if stop_notification
-                    .recv_timeout(dev.get_scan_interval())
+                    .recv_timeout(dev.scan_interval)
                     .is_ok()
                 {
                     break;
@@ -115,10 +124,16 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
 
         // Wait for fail counter threshold to be reached
         while fail_count < fail_count_threshold {
-            fail_count = cmp::max(0, fail_count + fail_count_rx.recv().unwrap());
-            debug!("fail_count={}", fail_count);
+            if fail_rx.recv().unwrap() {
+                fail_count += 1;
+                debug!("fail_count={}", fail_count);
+            } else if fail_count > 0 {
+                fail_count -= 1;
+                debug!("fail_count={}", fail_count);
+            }
         }
 
+        error!("{} modbus communication errors, exiting...", fail_count);
         stop_notification.broadcast(());
     })
     .unwrap();

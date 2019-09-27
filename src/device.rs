@@ -59,8 +59,8 @@ impl DataType {
 
 #[derive(Debug, PartialEq)]
 pub struct Device {
-    id: u8,
-    scan_interval: Duration,
+    pub id: u8,
+    pub scan_interval: Duration,
     tags: BTreeMap<String, String>,
     input_registers: Registers,
 }
@@ -78,10 +78,6 @@ impl Device {
             tags,
             input_registers: Registers::new(input_registers),
         }
-    }
-
-    pub fn get_scan_interval(&self) -> Duration {
-        self.scan_interval
     }
 
     pub fn read(&self, mb: &mut impl Client) -> Result<String, Error> {
