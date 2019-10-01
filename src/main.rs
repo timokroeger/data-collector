@@ -1,18 +1,18 @@
 mod config;
 mod device;
 
+use std::cell::RefCell;
 use std::convert::TryFrom;
 use std::fs::{self, File};
-use std::sync::{mpsc, Mutex};
 
 use crate::config::{Config, InfluxDbConfig};
 use crate::device::Device;
-use bus::Bus;
 use chrono::Local;
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
-use crossbeam_utils::thread as crossbeam_thread;
+use futures::{self, channel::mpsc, executor, prelude::*};
+use futures_timer::Delay;
 use isahc;
-use log::{debug, info, warn, error};
+use log::{debug, error, info, warn};
 use modbus::{tcp::Transport, Error as ModbusError};
 use simplelog::{Config as LogConfig, TermLogger, TerminalMode, WriteLogger};
 
@@ -78,7 +78,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
 
     debug!("Connecting to {}", modbus_hostname);
     let mb = Transport::new_with_cfg(&modbus_hostname, modbus_config)?;
-    let mb = &Mutex::new(mb);
+    let mb = &RefCell::new(mb);
 
     let influxdb_config = &config.influxdb;
 
@@ -95,52 +95,47 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
             scan_interval_iter.clone().max().unwrap() / scan_interval_iter.clone().min().unwrap(),
         )
         .unwrap();
-    let (fail_tx, fail_rx) = mpsc::channel::<bool>();
+    debug!("fail_count_threshold={}", fail_count_threshold);
+    let (fail_tx, mut fail_rx) = mpsc::channel::<bool>(devices.len());
 
-    let mut stop_notification = Bus::new(1);
-
-    crossbeam_thread::scope(|s| {
-        for dev in devices {
-            let fail_tx = fail_tx.clone();
-            let mut stop_notification = stop_notification.add_rx();
-            s.spawn(move |_| loop {
-                match read_device(&dev, &mut *mb.lock().unwrap(), influxdb_config) {
+    let futures = devices.into_iter().map(|dev| {
+        let mut fail_tx = fail_tx.clone();
+        Box::pin(async move {
+            loop {
+                // Keep on seperate line so that the `mb` RefCell is not borrowed in the match body anymore.
+                let read_result = read_device(&dev, &mut mb.borrow_mut(), influxdb_config);
+                match read_result {
                     Ok(_) => {
                         debug!("ModbusTCP: Device {} read successfully", dev.id);
-                        fail_tx.send(false).unwrap();
+                        fail_tx.send(false).await.unwrap();
                     }
                     Err(e) => {
                         warn!("ModbusTCP: {}", e);
-                        fail_tx.send(true).unwrap();
+                        fail_tx.send(true).await.unwrap();
                     }
                 }
 
-                // During normal operation the timeout is used as delay.
-                // A stop notficiation breaks out of the loop and exits the thread.
-                if stop_notification
-                    .recv_timeout(dev.scan_interval)
-                    .is_ok()
-                {
-                    break;
-                }
-            });
-        }
-
-        // Wait for fail counter threshold to be reached
-        while fail_count < fail_count_threshold {
-            if fail_rx.recv().unwrap() {
-                fail_count += 1;
-                debug!("fail_count={}", fail_count);
-            } else if fail_count > 0 {
-                fail_count -= 1;
-                debug!("fail_count={}", fail_count);
+                Delay::new(dev.scan_interval).await.unwrap();
             }
-        }
+        })
+    });
 
-        error!("{} modbus communication errors, exiting...", fail_count);
-        stop_notification.broadcast(());
-    })
-    .unwrap();
+    executor::block_on(future::select(
+        Box::pin(async {
+            // Wait for fail counter threshold to be reached
+            while fail_count < fail_count_threshold {
+                if fail_rx.next().await.unwrap() {
+                    fail_count += 1;
+                    debug!("fail_count={}", fail_count);
+                } else if fail_count > 0 {
+                    fail_count -= 1;
+                    debug!("fail_count={}", fail_count);
+                }
+            }
+            error!("{} modbus communication errors, exiting...", fail_count);
+        }),
+        future::join_all(futures),
+    ));
 
     Ok(())
 }
