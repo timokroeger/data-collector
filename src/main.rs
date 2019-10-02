@@ -9,8 +9,8 @@ use crate::config::{Config, InfluxDbConfig};
 use crate::device::Device;
 use chrono::Local;
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
-use futures::{self, channel::mpsc, executor, prelude::*};
-use futures_timer::Delay;
+use futures::{self, executor, prelude::*, select, stream};
+use futures_timer::Interval;
 use isahc;
 use log::{debug, error, info, warn};
 use modbus::{tcp::Transport, Error as ModbusError};
@@ -96,46 +96,41 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
         )
         .unwrap();
     debug!("fail_count_threshold={}", fail_count_threshold);
-    let (fail_tx, mut fail_rx) = mpsc::channel::<bool>(devices.len());
 
-    let futures = devices.into_iter().map(|dev| {
-        let mut fail_tx = fail_tx.clone();
-        Box::pin(async move {
-            loop {
-                // Keep on seperate line so that the `mb` RefCell is not borrowed in the match body anymore.
-                let read_result = read_device(&dev, &mut mb.borrow_mut(), influxdb_config);
-                match read_result {
-                    Ok(_) => {
-                        debug!("ModbusTCP: Device {} read successfully", dev.id);
-                        fail_tx.send(false).await.unwrap();
-                    }
-                    Err(e) => {
-                        warn!("ModbusTCP: {}", e);
-                        fail_tx.send(true).await.unwrap();
-                    }
-                }
-
-                Delay::new(dev.scan_interval).await.unwrap();
-            }
+    let device_streams = devices.into_iter().map(|dev| {
+        Interval::new(dev.scan_interval).map(move |_| {
+            let result = read_device(&dev, &mut mb.borrow_mut(), influxdb_config);
+            match result {
+                Ok(_) => debug!("Device {} read successfully", dev.id),
+                Err(ref e) => warn!("ModbusTCP: {}", e),
+            };
+            result
         })
     });
 
-    executor::block_on(future::select(
-        Box::pin(async {
-            // Wait for fail counter threshold to be reached
-            while fail_count < fail_count_threshold {
-                if fail_rx.next().await.unwrap() {
-                    fail_count += 1;
-                    debug!("fail_count={}", fail_count);
-                } else if fail_count > 0 {
-                    fail_count -= 1;
-                    debug!("fail_count={}", fail_count);
+    // Combine all device streams into one which to pull out results one by one.
+    let mut device_stream = stream::select_all(device_streams);
+
+    executor::block_on(async move {
+        loop {
+            select! {
+                fail = device_stream.next() => {
+                    if fail.unwrap().is_err() {
+                        fail_count += 1;
+                        debug!("fail_count={}", fail_count);
+                    } else if fail_count > 0 {
+                        fail_count -= 1;
+                        debug!("fail_count={}", fail_count);
+                    }
+
+                    if fail_count >= fail_count_threshold {
+                        error!("{} modbus communication errors, exiting...", fail_count);
+                        break;
+                    }
                 }
             }
-            error!("{} modbus communication errors, exiting...", fail_count);
-        }),
-        future::join_all(futures),
-    ));
+        }
+    });
 
     Ok(())
 }
