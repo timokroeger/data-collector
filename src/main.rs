@@ -9,7 +9,8 @@ use crate::config::{Config, InfluxDbConfig};
 use crate::device::Device;
 use chrono::Local;
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
-use futures::{self, executor, prelude::*, select, stream};
+use ctrlc;
+use futures::{self, channel::mpsc, executor, prelude::*, select, stream};
 use futures_timer::Interval;
 use isahc;
 use log::{debug, error, info, warn};
@@ -111,9 +112,17 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     // Combine all device streams into one which to pull out results one by one.
     let mut device_stream = stream::select_all(device_streams);
 
+    // Handling for graceful shutdown
+    let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
+    ctrlc::set_handler(move || shutdown_tx.clone().try_send(()).unwrap()).unwrap();
+
     executor::block_on(async move {
         loop {
             select! {
+                _ = shutdown_rx.next() => {
+                    info!("Graceful exit");
+                    break;
+                }
                 fail = device_stream.next() => {
                     if fail.unwrap().is_err() {
                         fail_count += 1;
