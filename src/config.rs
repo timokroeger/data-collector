@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::device::{DataType, Device, Register};
 use humantime;
-use isahc::http::{Request, Result as HttpResult};
+use isahc::http::Request;
 use modbus::tcp::Config as ModbusTcpConfig;
 use serde::Deserialize;
 
@@ -59,7 +59,7 @@ pub enum InfluxDbConfig {
 }
 
 impl InfluxDbConfig {
-    pub fn to_request<T>(&self, lines: T) -> HttpResult<Request<T>> {
+    pub fn to_request<T>(&self, lines: T) -> Request<T> {
         let mut req = Request::builder();
 
         match self {
@@ -89,7 +89,9 @@ impl InfluxDbConfig {
             }
         };
 
-        req.method("POST").body(lines)
+        req.method("POST")
+            .body(lines)
+            .expect("Failed to create InfluxDB http request")
     }
 }
 

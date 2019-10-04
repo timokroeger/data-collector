@@ -10,12 +10,27 @@ use crate::device::Device;
 use chrono::Local;
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
 use ctrlc;
+use derive_more::{Display, From};
 use futures::{self, channel::mpsc, executor, prelude::*, select, stream};
 use futures_timer::Interval;
-use isahc;
+use isahc::{self, Error as HttpError};
 use log::{debug, error, info, warn};
 use modbus::{tcp::Transport, Error as ModbusError};
 use simplelog::{Config as LogConfig, TermLogger, TerminalMode, WriteLogger};
+
+#[derive(Debug, Display, From)]
+enum Error {
+    #[display(fmt = "ModbusTCP: {}", "_0")]
+    Modbus(ModbusError),
+    #[display(fmt = "InfluxDB: {}", "_0")]
+    InfluxDb(InfluxDbError),
+}
+
+#[derive(Debug, Display, From)]
+enum InfluxDbError {
+    Http(HttpError),
+    Other(String),
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     // Parse command line arguments
@@ -103,7 +118,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
             let result = read_device(&dev, &mut mb.borrow_mut(), influxdb_config);
             match result {
                 Ok(_) => debug!("Device {} read successfully", dev.id),
-                Err(ref e) => warn!("ModbusTCP: {}", e),
+                Err(ref e) => warn!("{}", e),
             };
             result
         })
@@ -148,21 +163,16 @@ fn read_device(
     dev: &Device,
     mb: &mut Transport,
     influxdb_config: &InfluxDbConfig,
-) -> Result<(), ModbusError> {
+) -> Result<(), Error> {
     let lines = dev.read(mb)?;
 
-    let req = influxdb_config
-        .to_request(lines)
-        .expect("Failed to create InfluxDB http request");
+    let req = influxdb_config.to_request(lines);
     let resp = isahc::send(req);
     match resp {
-        Ok(resp) => {
-            if !resp.status().is_success() {
-                warn!("InfluxDB: {:?}", resp);
-            }
+        Ok(resp) if !resp.status().is_success() => {
+            Err(InfluxDbError::Other(format!("{:?}", resp)).into())
         }
-        Err(e) => warn!("InfluxDB: {}", e),
+        Err(e) => Err(InfluxDbError::Http(e).into()),
+        Ok(_) => Ok(()),
     }
-
-    Ok(())
 }
