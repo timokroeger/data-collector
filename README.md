@@ -1,7 +1,17 @@
 # data-collector
-[![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/timokroeger/data-collector.svg)](https://hub.docker.com/r/timokroeger/data-collector/builds)
 
 Configurable Modbus client which sends the collected data to InfluxDB.
+
+## Build Instructions
+
+Requirements:
+* Rust 1.39+ because of async/await syntax
+* Optional: Docker and rustup (to build a Raspberry Pi image)
+
+### Raspberry Pi Docker Image
+
+    cargo install --force cargo-make
+    cargo make rpi-image
 
 ## Usage
 

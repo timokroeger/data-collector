@@ -1,0 +1,12 @@
+[tasks.rpi-cross]
+install_crate = "cross"
+command = "cross"
+args = ["build", "--release", "--target", "armv7-unknown-linux-musleabihf"]
+
+[tasks.rpi-image]
+dependencies = ["rpi-cross"]
+command = "docker"
+args = ["build", "-f", "Dockerfile.rpi", "-t", "data-collector:v${CARGO_MAKE_CRATE_VERSION}", "."]
+
+[env]
+DOCKER_BUILDKIT = "1" # Speed up docker builds
