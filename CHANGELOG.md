@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 - -
 
+## v0.9.0 - 2019-10-05
+- Use async code instead threads
+- Only log messages from this crate
+- Graceful shutdown
+
 ## v0.8.0 - 2019-09-27
 - Improved logging (local time and padding for log level)
 - Better error handling
