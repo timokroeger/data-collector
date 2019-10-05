@@ -114,19 +114,16 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
         .unwrap();
     debug!("fail_count_threshold={}", fail_count_threshold);
 
-    let device_streams = devices
+    // A stream that yields a refence to a device every time its `scan_interval` is due.
+    let device_intervals = devices
         .iter()
         .map(|dev| Interval::new(dev.scan_interval).map(move |_| dev));
 
     // Combine all device interval streams into one to process one device after the other.
-    let mut device_stream = stream::select_all(device_streams).map(move |dev| {
-        let result = read_device(dev, &mut mb.borrow_mut(), influxdb_config);
-        match result {
-            Ok(_) => debug!("Device {} read successfully", dev.id),
-            Err(ref e) => warn!("{}", e),
-        };
-        result
-    });
+    let mut device_results = stream::select_all(device_intervals)
+        .map(move |dev| process_device(dev, &mut mb.borrow_mut(), influxdb_config))
+        .inspect_ok(|dev| debug!("Device {} processed successfully", dev.id))
+        .inspect_err(|e| warn!("{}", e));
 
     // Handling for graceful shutdown
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
@@ -139,8 +136,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
                     info!("Graceful exit");
                     break;
                 }
-                fail = device_stream.next() => {
-                    if fail.unwrap().is_err() {
+                r = device_results.next() => {
+                    if r.unwrap().is_err() {
                         fail_count += 1;
                         debug!("fail_count={}", fail_count);
                     } else if fail_count > 0 {
@@ -160,11 +157,11 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     Ok(())
 }
 
-fn read_device(
-    dev: &Device,
+fn process_device<'a>(
+    dev: &'a Device,
     mb: &mut Transport,
     influxdb_config: &InfluxDbConfig,
-) -> Result<(), Error> {
+) -> Result<&'a Device, Error> {
     let lines = dev.read(mb)?;
 
     let req = influxdb_config.to_request(lines);
@@ -174,6 +171,6 @@ fn read_device(
             Err(InfluxDbError::Other(format!("{:?}", resp)).into())
         }
         Err(e) => Err(InfluxDbError::Http(e).into()),
-        Ok(_) => Ok(()),
+        Ok(_) => Ok(dev),
     }
 }
