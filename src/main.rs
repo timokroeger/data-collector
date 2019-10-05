@@ -113,19 +113,19 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
         .unwrap();
     debug!("fail_count_threshold={}", fail_count_threshold);
 
-    let device_streams = devices.into_iter().map(|dev| {
-        Interval::new(dev.scan_interval).map(move |_| {
-            let result = read_device(&dev, &mut mb.borrow_mut(), influxdb_config);
-            match result {
-                Ok(_) => debug!("Device {} read successfully", dev.id),
-                Err(ref e) => warn!("{}", e),
-            };
-            result
-        })
-    });
+    let device_streams = devices
+        .iter()
+        .map(|dev| Interval::new(dev.scan_interval).map(move |_| dev));
 
-    // Combine all device streams into one which to pull out results one by one.
-    let mut device_stream = stream::select_all(device_streams);
+    // Combine all device interval streams into one to process one device after the other.
+    let mut device_stream = stream::select_all(device_streams).map(move |dev| {
+        let result = read_device(dev, &mut mb.borrow_mut(), influxdb_config);
+        match result {
+            Ok(_) => debug!("Device {} read successfully", dev.id),
+            Err(ref e) => warn!("{}", e),
+        };
+        result
+    });
 
     // Handling for graceful shutdown
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
