@@ -66,6 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     let log_config = LogConfig {
         time_format: Some("%Y-%m-%dT%H:%M:%S%.3f%:z"), // RFC3339 format
         offset: *Local::today().offset(),
+        filter_allow: Some(&["data_collector"]),
         ..LogConfig::default()
     };
     let log_level = matches.value_of("loglevel").unwrap().parse()?;
