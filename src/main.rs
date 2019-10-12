@@ -7,7 +7,6 @@ use std::fs::{self, File};
 
 use crate::config::{Config, InfluxDbConfig};
 use crate::device::Device;
-use chrono::Local;
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
 use ctrlc;
 use derive_more::{Display, From};
@@ -16,7 +15,7 @@ use futures_timer::Interval;
 use isahc::{self, Error as HttpError};
 use log::{debug, error, info, warn};
 use modbus::{tcp::Transport, Error as ModbusError};
-use simplelog::{Config as LogConfig, TermLogger, TerminalMode, WriteLogger};
+use simplelog::{ConfigBuilder as LogConfigBuilder, TermLogger, TerminalMode, WriteLogger};
 
 #[derive(Debug, Display, From)]
 enum Error {
@@ -63,12 +62,11 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
         .get_matches();
 
     // Setup logging
-    let log_config = LogConfig {
-        time_format: Some("%Y-%m-%dT%H:%M:%S%.3f%:z"), // RFC3339 format
-        offset: *Local::today().offset(),
-        filter_allow: Some(&["data_collector"]),
-        ..LogConfig::default()
-    };
+    let log_config = LogConfigBuilder::new()
+        .set_time_format_str("%Y-%m-%dT%H:%M:%S%.3f%:z") // RFC3339 format
+        .set_time_to_local(true)
+        .add_filter_allow_str("data_collector")
+        .build();
     let log_level = matches.value_of("loglevel").unwrap().parse()?;
     match matches.value_of("logfile") {
         Some(logfile) => {
