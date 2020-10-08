@@ -7,31 +7,16 @@ use std::fs::{self, File};
 
 use crate::config::{Config, InfluxDbConfig};
 use crate::device::Device;
+use anyhow::{ensure, Result};
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
 use ctrlc;
-use derive_more::{Display, From};
 use futures::{self, channel::mpsc, executor, prelude::*, select, stream};
 use futures_timer::Interval;
-use isahc::{self, Error as HttpError};
-use log::{debug, error, info, warn};
-use modbus::{tcp::Transport, Error as ModbusError};
+use log::{debug, info, warn};
+use modbus::tcp::Transport;
 use simplelog::{ConfigBuilder as LogConfigBuilder, TermLogger, TerminalMode, WriteLogger};
 
-#[derive(Debug, Display, From)]
-enum Error {
-    #[display(fmt = "ModbusTCP: {}", "_0")]
-    Modbus(ModbusError),
-    #[display(fmt = "InfluxDB: {}", "_0")]
-    InfluxDb(InfluxDbError),
-}
-
-#[derive(Debug, Display, From)]
-enum InfluxDbError {
-    Http(HttpError),
-    Other(String),
-}
-
-fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
+fn main() -> Result<()> {
     // Parse command line arguments
     let matches = app_from_crate!()
         .arg(
@@ -143,10 +128,11 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
                         debug!("fail_count={}", fail_count);
                     }
 
-                    if fail_count >= fail_count_threshold {
-                        error!("{} modbus communication errors, exiting...", fail_count);
-                        break;
-                    }
+                    ensure!(
+                        fail_count < fail_count_threshold,
+                        "{} modbus communication errors, exiting...",
+                        fail_count
+                    );
                 }
             }
         }
@@ -159,16 +145,12 @@ fn process_device<'a>(
     dev: &'a Device,
     mb: &mut Transport,
     influxdb_config: &InfluxDbConfig,
-) -> Result<&'a Device, Error> {
+) -> Result<&'a Device> {
     let lines = dev.read(mb)?;
 
     let req = influxdb_config.to_request(lines);
-    let resp = isahc::send(req);
-    match resp {
-        Ok(resp) if !resp.status().is_success() => {
-            Err(InfluxDbError::Other(format!("{:?}", resp)).into())
-        }
-        Err(e) => Err(InfluxDbError::Http(e).into()),
-        Ok(_) => Ok(dev),
-    }
+    let resp = isahc::send(req)?;
+    ensure!(resp.status().is_success(), "{:?}", resp);
+
+    Ok(dev)
 }
