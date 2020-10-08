@@ -5,7 +5,7 @@ use isahc::http::Request;
 use modbus::tcp::Config as ModbusTcpConfig;
 use serde::Deserialize;
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Config {
     pub modbus: ModbusConfig,
 
@@ -16,7 +16,7 @@ pub struct Config {
     pub devices: DevicesConfig,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct ModbusConfig {
     pub hostname: String,
     pub port: u16,
@@ -39,7 +39,7 @@ impl ModbusConfig {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub enum InfluxDbConfig {
     #[serde(rename = "influxdb")]
     V1 {
@@ -94,7 +94,7 @@ impl InfluxDbConfig {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct DevicesConfig {
     #[serde(default)]
     templates: BTreeMap<String, DeviceConfig>,
@@ -175,7 +175,7 @@ fn device_from_config(
     )
 }
 
-#[derive(Clone, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 struct DeviceConfig {
     template: Option<String>,
     id: Option<u8>,
@@ -188,7 +188,7 @@ struct DeviceConfig {
     input_registers: Vec<RegisterConfig>,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(untagged)]
 enum RegisterConfig {
     Simple(u16),
