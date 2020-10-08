@@ -5,11 +5,12 @@ use std::cell::RefCell;
 use std::convert::TryFrom;
 use std::fs::{self, File};
 
-use crate::config::{Config, InfluxDbConfig};
-use crate::device::Device;
+use crate::{
+    config::{Config, InfluxDbConfig},
+    device::Device,
+};
 use anyhow::{ensure, Result};
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
-use ctrlc;
 use futures::{self, channel::mpsc, executor, prelude::*, select, stream};
 use futures_timer::Interval;
 use log::{debug, info, warn};

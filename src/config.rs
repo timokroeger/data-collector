@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
 use crate::device::{DataType, Device, Register};
-use humantime;
 use isahc::http::Request;
 use modbus::tcp::Config as ModbusTcpConfig;
 use serde::Deserialize;
