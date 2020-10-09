@@ -2,7 +2,6 @@ mod config;
 mod device;
 
 use std::cell::RefCell;
-use std::convert::TryFrom;
 use std::fs::{self, File};
 
 use crate::{
@@ -89,13 +88,11 @@ async fn main() -> Result<()> {
     // When the counter reaches the threshold (e.g. all devices on the bus failed
     // two times in a row) action is taken.
     let mut fail_count = 0;
-    let scan_interval_iter = devices.iter().map(|d| d.scan_interval.as_nanos());
-    let fail_count_threshold = 2
-        * devices.len()
-        * usize::try_from(
-            scan_interval_iter.clone().max().unwrap() / scan_interval_iter.clone().min().unwrap(),
-        )
-        .unwrap();
+    let fastest_device = devices.iter().min_by_key(|d| d.scan_interval).unwrap();
+    let slowest_device = devices.iter().max_by_key(|d| d.scan_interval).unwrap();
+    let interval_ratio = (slowest_device.scan_interval.as_secs_f64()
+        / fastest_device.scan_interval.as_secs_f64()) as usize;
+    let fail_count_threshold = 2 * devices.len() * interval_ratio;
     debug!("fail_count_threshold={}", fail_count_threshold);
 
     // Handling for graceful shutdown
