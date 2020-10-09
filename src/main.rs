@@ -11,13 +11,13 @@ use crate::{
 };
 use anyhow::{ensure, Result};
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
-use futures::{self, channel::mpsc, executor, prelude::*, select, stream};
-use futures_timer::Interval;
+use futures::{self, channel::mpsc, prelude::*, select, stream};
 use log::{debug, info, warn};
 use modbus::tcp::Transport;
 use simplelog::{ConfigBuilder as LogConfigBuilder, TermLogger, TerminalMode, WriteLogger};
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     // Parse command line arguments
     let matches = app_from_crate!()
         .arg(
@@ -98,46 +98,48 @@ fn main() -> Result<()> {
         .unwrap();
     debug!("fail_count_threshold={}", fail_count_threshold);
 
-    // A stream that yields a refence to a device every time its `scan_interval` is due.
-    let device_intervals = devices
-        .iter()
-        .map(|dev| Interval::new(dev.scan_interval).map(move |_| dev));
-
-    // Combine all device interval streams into one to process one device after the other.
-    let mut device_results = stream::select_all(device_intervals)
-        .map(move |dev| process_device(dev, &mut mb.borrow_mut(), influxdb_config))
-        .inspect_ok(|dev| debug!("Device {} processed successfully", dev.id))
-        .inspect_err(|e| warn!("{}", e));
-
     // Handling for graceful shutdown
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
     ctrlc::set_handler(move || shutdown_tx.clone().try_send(()).unwrap()).unwrap();
 
-    executor::block_on(async move {
-        loop {
-            select! {
-                _ = shutdown_rx.next() => {
-                    info!("Graceful exit");
-                    break;
-                }
-                r = device_results.next() => {
-                    if r.unwrap().is_err() {
+    // A stream that yields a refence to a device every time its `scan_interval` is due.
+    let mut device_intervals = stream::select_all(
+        devices
+            .iter()
+            .map(|dev| tokio::time::interval(dev.scan_interval).map(move |_| dev)),
+    );
+
+    loop {
+        select! {
+            _ = shutdown_rx.next() => {
+                info!("Graceful exit");
+                break;
+            }
+            dev = device_intervals.next() => {
+                let dev = dev.unwrap();
+                match process_device(dev, &mut mb.borrow_mut(), influxdb_config) {
+                    Ok(_) => {
+                        debug!("Device {} processed successfully", dev.id);
+                        if fail_count > 0 {
+                            fail_count -= 1;
+                            debug!("fail_count={}", fail_count);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("{}", e);
                         fail_count += 1;
                         debug!("fail_count={}", fail_count);
-                    } else if fail_count > 0 {
-                        fail_count -= 1;
-                        debug!("fail_count={}", fail_count);
                     }
-
-                    ensure!(
-                        fail_count < fail_count_threshold,
-                        "{} modbus communication errors, exiting...",
-                        fail_count
-                    );
                 }
+
+                ensure!(
+                    fail_count < fail_count_threshold,
+                    "{} modbus communication errors, exiting...",
+                    fail_count
+                );
             }
         }
-    });
+    }
 
     Ok(())
 }
@@ -146,12 +148,12 @@ fn process_device<'a>(
     dev: &'a Device,
     mb: &mut Transport,
     influxdb_config: &InfluxDbConfig,
-) -> Result<&'a Device> {
+) -> Result<()> {
     let lines = dev.read(mb)?;
 
     let req = influxdb_config.to_request(lines);
     let resp = isahc::send(req)?;
     ensure!(resp.status().is_success(), "{:?}", resp);
 
-    Ok(dev)
+    Ok(())
 }
