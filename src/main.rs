@@ -12,6 +12,7 @@ use crate::{
     device::Device,
 };
 use anyhow::{ensure, Result};
+use attohttpc::Response;
 use clap::{command, Arg};
 use log::{debug, info, warn};
 use modbus::tcp::Transport;
@@ -165,10 +166,37 @@ fn process_device(
     influxdb_config: &InfluxDbConfig,
 ) -> Result<()> {
     let lines = dev.read(mb)?;
-
-    let req = influxdb_config.to_request(lines);
-    let resp = isahc::send(req)?;
+    let resp = write_influxdb(lines, influxdb_config)?;
     ensure!(resp.status().is_success(), "{:?}", resp);
-
     Ok(())
+}
+
+fn write_influxdb(lines: String, influxdb_config: &InfluxDbConfig) -> Result<Response> {
+    let req = match influxdb_config {
+        InfluxDbConfig::V1 {
+            hostname,
+            database,
+            username,
+            password,
+        } => {
+            let mut uri = format!("{}/write?db={}", hostname, database);
+            if let (Some(u), Some(p)) = (username, password) {
+                uri.push_str(&format!("&u={}&p={}", u, p));
+            }
+            attohttpc::post(uri)
+        }
+        InfluxDbConfig::V2 {
+            hostname,
+            organization,
+            bucket,
+            auth_token,
+        } => attohttpc::post(format!(
+            "{}/write?org={}&bucket={}",
+            hostname, organization, bucket
+        ))
+        .header("Authorization", format!("Token {}", auth_token)),
+    };
+
+    let resp = req.text(lines).send()?;
+    Ok(resp)
 }
