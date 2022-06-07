@@ -9,7 +9,7 @@ use crate::{
     device::Device,
 };
 use anyhow::{ensure, Result};
-use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version, Arg};
+use clap::{command, Arg};
 use futures::{self, channel::mpsc, prelude::*, select, stream};
 use log::{debug, info, warn};
 use modbus::tcp::Transport;
@@ -18,10 +18,10 @@ use simplelog::{ConfigBuilder as LogConfigBuilder, TermLogger, TerminalMode, Wri
 #[tokio::main]
 async fn main() -> Result<()> {
     // Parse command line arguments
-    let matches = app_from_crate!()
+    let matches = command!()
         .arg(
-            Arg::with_name("config")
-                .short("c")
+            Arg::new("config")
+                .short('c')
                 .long("config")
                 .takes_value(true)
                 .value_name("FILE")
@@ -29,14 +29,14 @@ async fn main() -> Result<()> {
                 .help("Sets a custom config file"),
         )
         .arg(
-            Arg::with_name("logfile")
+            Arg::new("logfile")
                 .long("logfile")
                 .takes_value(true)
                 .value_name("FILE")
                 .help("Sets a custom log file"),
         )
         .arg(
-            Arg::with_name("loglevel")
+            Arg::new("loglevel")
                 .long("loglevel")
                 .takes_value(true)
                 .value_name("LEVEL")
