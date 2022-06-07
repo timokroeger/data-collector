@@ -48,8 +48,9 @@ async fn main() -> Result<()> {
 
     // Setup logging
     let log_config = LogConfigBuilder::new()
-        .set_time_format_str("%Y-%m-%dT%H:%M:%S%.3f%:z") // RFC3339 format
-        .set_time_to_local(true)
+        .set_time_format_rfc3339()
+        .set_time_offset_to_local()
+        .unwrap()
         .add_filter_allow_str("data_collector")
         .build();
     let log_level = matches.value_of("loglevel").unwrap().parse()?;
@@ -59,7 +60,12 @@ async fn main() -> Result<()> {
             WriteLogger::init(log_level, log_config, log_file)?
         }
         None => {
-            let _ = TermLogger::init(log_level, log_config, TerminalMode::Mixed);
+            let _ = TermLogger::init(
+                log_level,
+                log_config,
+                TerminalMode::Mixed,
+                simplelog::ColorChoice::Auto,
+            );
         }
     }
 
