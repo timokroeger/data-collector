@@ -24,10 +24,10 @@ pub struct ModbusConfig {
 }
 
 impl ModbusConfig {
-    pub fn into_modbus_tcp_config(self) -> (String, ModbusTcpConfig) {
+    pub fn to_modbus_tcp_config(&self) -> (String, ModbusTcpConfig) {
         let timeout = humantime::parse_duration(&self.timeout).unwrap();
         (
-            self.hostname,
+            self.hostname.clone(),
             ModbusTcpConfig {
                 tcp_port: self.port,
                 tcp_connect_timeout: None,
@@ -102,10 +102,10 @@ pub struct DevicesConfig {
 }
 
 impl DevicesConfig {
-    pub fn into_devices(self) -> Vec<Device> {
+    pub fn to_devices(&self) -> Vec<Device> {
         let mut devices = Vec::new();
-        for config in self.devices {
-            devices.push(device_from_config(&self.templates, config));
+        for config in &self.devices {
+            devices.push(device_from_config(&self.templates, config.clone()));
         }
         devices
     }
@@ -250,7 +250,7 @@ mod tests {
             BTreeMap::new(),
             registers,
         )];
-        assert_eq!(dc.into_devices(), devices);
+        assert_eq!(dc.to_devices(), devices);
     }
 
     #[test]
@@ -304,7 +304,7 @@ mod tests {
             BTreeMap::new(),
             registers,
         )];
-        assert_eq!(dc.into_devices(), devices);
+        assert_eq!(dc.to_devices(), devices);
     }
 
     #[test]
@@ -352,6 +352,6 @@ mod tests {
             device_tags,
             registers,
         )];
-        assert_eq!(dc.into_devices(), devices);
+        assert_eq!(dc.to_devices(), devices);
     }
 }

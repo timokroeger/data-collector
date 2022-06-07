@@ -1,8 +1,11 @@
 mod config;
 mod device;
 
-use std::cell::RefCell;
 use std::fs::{self, File};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{mpsc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 use crate::{
     config::{Config, InfluxDbConfig},
@@ -10,13 +13,13 @@ use crate::{
 };
 use anyhow::{ensure, Result};
 use clap::{command, Arg};
-use futures::{self, channel::mpsc, prelude::*, select, stream};
 use log::{debug, info, warn};
 use modbus::tcp::Transport;
 use simplelog::{ConfigBuilder as LogConfigBuilder, TermLogger, TerminalMode, WriteLogger};
 
-#[tokio::main]
-async fn main() -> Result<()> {
+static FAIL_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+fn main() -> Result<()> {
     // Parse command line arguments
     let matches = command!()
         .arg(
@@ -76,24 +79,21 @@ async fn main() -> Result<()> {
     let config_str = fs::read_to_string(config_file)?;
     let config: Config = toml::from_str(&config_str)?;
 
-    let devices = config.devices.into_devices();
+    let devices = config.devices.to_devices();
 
     // Connect Modbus
-    let modbus_config = config.modbus;
-    let (modbus_hostname, modbus_config) = modbus_config.into_modbus_tcp_config();
+    let (modbus_hostname, modbus_config) = config.modbus.to_modbus_tcp_config();
 
     debug!("Connecting to {}", modbus_hostname);
     let mb = Transport::new_with_cfg(&modbus_hostname, modbus_config)?;
-    let mb = &RefCell::new(mb);
-
-    let influxdb_config = &config.influxdb;
+    let mb = Mutex::new(mb); // Make it accessible from multiple threads.
+    let mb = Box::leak(Box::new(mb)) as &_;
 
     // Share one failure counter for all devices.
     // With each failed device communication the counter is increased.
     // With each successfull device communicationt the counter is decreased.
     // When the counter reaches the threshold (e.g. all devices on the bus failed
     // two times in a row) action is taken.
-    let mut fail_count = 0;
     let fastest_device = devices.iter().min_by_key(|d| d.scan_interval).unwrap();
     let slowest_device = devices.iter().max_by_key(|d| d.scan_interval).unwrap();
     let interval_ratio = (slowest_device.scan_interval.as_secs_f64()
@@ -101,54 +101,66 @@ async fn main() -> Result<()> {
     let fail_count_threshold = 2 * devices.len() * interval_ratio;
     debug!("fail_count_threshold={}", fail_count_threshold);
 
-    // Handling for graceful shutdown
-    let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
-    ctrlc::set_handler(move || shutdown_tx.clone().try_send(()).unwrap()).unwrap();
+    // Spawn a thread for each configured modbus device
+    for dev in devices {
+        let influxdb_config = config.influxdb.clone();
+        thread::spawn(move || device_thread(dev, mb, influxdb_config, &FAIL_COUNT));
+    }
 
-    // A stream that yields a refence to a device every time its `scan_interval` is due.
-    let mut device_intervals = stream::select_all(
-        devices
-            .iter()
-            .map(|dev| tokio::time::interval(dev.scan_interval).map(move |_| dev)),
-    );
+    // Handling for graceful shutdown
+    let (shutdown_tx, shutdown_rx) = mpsc::sync_channel(1);
+    ctrlc::set_handler(move || shutdown_tx.send(()).unwrap()).unwrap();
 
     loop {
-        select! {
-            _ = shutdown_rx.next() => {
-                info!("Graceful exit");
-                break;
-            }
-            dev = device_intervals.next() => {
-                let dev = dev.unwrap();
-                match process_device(dev, &mut mb.borrow_mut(), influxdb_config) {
-                    Ok(_) => {
-                        debug!("Device {} processed successfully", dev.id);
-                        if fail_count > 0 {
-                            fail_count -= 1;
-                            debug!("fail_count={}", fail_count);
-                        }
-                    }
-                    Err(e) => {
-                        warn!("{}", e);
-                        fail_count += 1;
-                        debug!("fail_count={}", fail_count);
-                    }
-                }
-
-                ensure!(
-                    fail_count < fail_count_threshold,
-                    "{} modbus communication errors, exiting...",
-                    fail_count
-                );
-            }
+        if shutdown_rx.recv_timeout(Duration::from_secs(1)).is_ok() {
+            info!("Graceful exit");
+            break;
         }
+
+        let fail_count = FAIL_COUNT.load(Ordering::Acquire);
+        ensure!(
+            fail_count < fail_count_threshold,
+            "{} modbus communication errors, exiting...",
+            fail_count
+        );
     }
 
     Ok(())
 }
 
-fn process_device<'a>(
-    dev: &'a Device,
+fn device_thread(
+    dev: Device,
+    mb: &Mutex<Transport>,
+    influxdb_config: InfluxDbConfig,
+    fail_count: &AtomicUsize,
+) {
+    loop {
+        match process_device(&dev, &mut mb.lock().unwrap(), &influxdb_config) {
+            Ok(_) => {
+                debug!("Device {} processed successfully", dev.id);
+                fail_count
+                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |fail_count| {
+                        if fail_count > 0 {
+                            let fail_count = fail_count - 1;
+                            Some(fail_count)
+                        } else {
+                            Some(0)
+                        }
+                    })
+                    .unwrap();
+            }
+            Err(e) => {
+                warn!("{}", e);
+                fail_count.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        thread::sleep(dev.scan_interval);
+    }
+}
+
+fn process_device(
+    dev: &Device,
     mb: &mut Transport,
     influxdb_config: &InfluxDbConfig,
 ) -> Result<()> {

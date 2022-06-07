@@ -10,7 +10,6 @@ publish = false
 anyhow = "1.0"
 clap = { version = "3.1", features = ["cargo"] }
 ctrlc = { version = "3.2", features = ["termination"] }
-futures = "0.3"
 humantime = "2.1.0"
 isahc = "0.7"
 log = "0.4"
@@ -18,4 +17,3 @@ modbus = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 simplelog = "0.12.0"
 toml = "0.5"
-tokio = { version = "0.2", features = ["macros", "rt-core", "stream", "time"] }
